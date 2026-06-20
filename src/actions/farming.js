@@ -89,10 +89,13 @@ function register(bot, goals) {
     await bot.equip(hoe, 'hand');
 
     let tilledCount = 0;
+    const initialTask = bot._currentTask;
 
     // Till the soil
     for (let dx = 0; dx < width; dx++) {
+      if (bot._currentTask !== initialTask) break;
       for (let dz = 0; dz < length; dz++) {
+        if (bot._currentTask !== initialTask) break;
         const blockPos = new Vec3(startX + dx, startY - 1, startZ + dz);
         const block = bot.blockAt(blockPos);
         if (!block) continue;
@@ -123,7 +126,9 @@ function register(bot, goals) {
       const centerZ = startZ + Math.floor(length / 2);
       // Place water at center positions every 4 blocks
       for (let dx = 0; dx < width; dx += 4) {
+        if (bot._currentTask !== initialTask) break;
         for (let dz = 0; dz < length; dz += 4) {
+          if (bot._currentTask !== initialTask) break;
           const waterPos = new Vec3(startX + dx, startY - 1, startZ + dz);
           try {
             await navigateNear(bot, goals, waterPos, 3);
@@ -159,7 +164,9 @@ function register(bot, goals) {
       const seedItem = findItemByName(bot, crop);
       if (seedItem) {
         for (let dx = 0; dx < width; dx++) {
+          if (bot._currentTask !== initialTask) break;
           for (let dz = 0; dz < length; dz++) {
+            if (bot._currentTask !== initialTask) break;
             const blockPos = new Vec3(startX + dx, startY - 1, startZ + dz);
             const block = bot.blockAt(blockPos);
             if (!block || block.name !== 'farmland') continue;
@@ -219,8 +226,10 @@ function register(bot, goals) {
     }
 
     let planted = 0;
+    const initialTask = bot._currentTask;
 
     for (const pos of farmlandPositions) {
+      if (bot._currentTask !== initialTask) break;
       // Check if the block above is air
       const abovePos = pos.offset(0, 1, 0);
       const aboveBlock = bot.blockAt(abovePos);
@@ -283,8 +292,10 @@ function register(bot, goals) {
     let harvested = 0;
     let replanted = 0;
     const seedName = CROP_TO_SEED[cropName];
+    const initialTask = bot._currentTask;
 
     for (const pos of cropPositions) {
+      if (bot._currentTask !== initialTask) break;
       const block = bot.blockAt(pos);
       if (!block) continue;
 
@@ -330,9 +341,11 @@ function register(bot, goals) {
   async function farmCycle(action) {
     bot.chat('Starting farm cycle...');
     const summary = [];
+    const initialTask = bot._currentTask;
 
     // Step 1: Harvest all mature crops with replant
     for (const cropName of Object.keys(CROP_MATURITY)) {
+      if (bot._currentTask !== initialTask) return;
       const cropBlockEntry = bot.registry.blocksByName[cropName];
       if (!cropBlockEntry) continue;
 
@@ -350,6 +363,7 @@ function register(bot, goals) {
 
     // Step 2: Plant seeds on any empty farmland
     // Try planting any seeds we have
+    if (bot._currentTask !== initialTask) return;
     const seedTypes = ['wheat_seeds', 'carrot', 'potato', 'beetroot_seeds'];
     for (const seedName of seedTypes) {
       const seedItem = findItemByName(bot, seedName);
@@ -375,6 +389,7 @@ function register(bot, goals) {
     }
 
     // Step 3: Check food level and eat if needed
+    if (bot._currentTask !== initialTask) return;
     if (bot.food < 14) {
       const food = findBestFood(bot);
       if (food) {
@@ -389,6 +404,7 @@ function register(bot, goals) {
     }
 
     // Step 4: If we have >= 3 wheat, try to craft bread
+    if (bot._currentTask !== initialTask) return;
     const wheatCount = countItemByName(bot, 'wheat');
     if (wheatCount >= 3) {
       try {

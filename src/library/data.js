@@ -5,22 +5,81 @@ const builds = require('./builds');
 const cook = require('./cook');
 const { resolveItemName } = require('./modules/itemNameResolver');
 
+let currentBot = null;
+
+function init(bot) {
+  currentBot = bot;
+}
+
 function normalizeKey(name) {
   return resolveItemName(String(name || '').trim().toLowerCase());
 }
 
 function getBlockDrop(blockName) {
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    const block = registry.blocksByName[blockName.toLowerCase()];
+    if (block) {
+      if (block.drops && block.drops.length > 0) {
+        const dropId = block.drops[0];
+        return registry.items[dropId]?.name || blockName;
+      }
+      return blockName;
+    }
+  }
   const normalized = normalizeKey(blockName);
   return blockDropMap[normalized] || normalized;
 }
 
 function getMobInfo(mobName) {
   const normalized = String(mobName || '').trim().toLowerCase();
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    const entity = registry.entitiesByName[normalized];
+    if (entity) {
+      const isHostile = entity.type === 'hostile' || entity.type === 'monster' || entity.category === 'Hostile mobs';
+      const type = isHostile ? 'hostile' : (entity.type === 'passive' || entity.category === 'Passive mobs' ? 'passive' : 'neutral');
+      const staticInfo = mobMap[normalized];
+      return {
+        type,
+        health: staticInfo ? staticInfo.health : 20,
+        isAggressive: staticInfo ? staticInfo.isAggressive : (type === 'hostile'),
+        drops: staticInfo ? staticInfo.drops : [],
+        threat: staticInfo ? staticInfo.threat : (type === 'hostile' ? 3 : (type === 'neutral' ? 1 : 0))
+      };
+    }
+  }
   return mobMap[normalized] || null;
 }
 
 function getRecipe(itemName) {
   const normalized = normalizeKey(itemName);
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    const item = registry.itemsByName[normalized];
+    if (item) {
+      const recipes = registry.recipes[item.id];
+      if (recipes && recipes.length > 0) {
+        const r = recipes[0];
+        const ingredientsMap = {};
+        const ingredientList = r.ingredients || (r.inShape ? r.inShape.flat() : []);
+        for (const ing of ingredientList) {
+          if (ing === null || ing === -1) continue;
+          const ingId = typeof ing === 'object' ? ing.id : ing;
+          const ingCount = typeof ing === 'object' ? (ing.count || 1) : 1;
+          const ingName = registry.items[ingId]?.name;
+          if (ingName) {
+            ingredientsMap[ingName] = (ingredientsMap[ingName] || 0) + ingCount;
+          }
+        }
+        return {
+          count: r.result.count,
+          table: r.requiresTable || false,
+          ingredients: Object.entries(ingredientsMap).map(([name, count]) => ({ item: name, count }))
+        };
+      }
+    }
+  }
   return craftRecipes[normalized] || null;
 }
 
@@ -61,6 +120,7 @@ function getSmeltableOre(name) {
 }
 
 module.exports = {
+  init,
   blockDropMap,
   mobMap,
   craftRecipes,

@@ -149,8 +149,10 @@ function analyzeSite(bot, origin, facing, blueprint) {
 async function placeFoundationSupports(bot, goals, origin, facing, blueprint) {
   const positions = sitePositions(origin, facing, blueprint.footprint.width, blueprint.footprint.depth);
   let placed = 0;
+  const initialTask = bot._currentTask;
 
   for (const pos of positions) {
+    if (bot._currentTask !== initialTask) break;
     for (let depth = 1; depth <= 3; depth++) {
       const supportPos = pos.offset(0, -depth, 0);
       const block = bot.blockAt(supportPos);
@@ -174,8 +176,13 @@ async function executeBuildPlan(bot, goals, plan) {
   let failed = 0;
   let skippedOptional = 0;
   let currentStage = '';
+  const initialTask = bot._currentTask;
 
   for (const step of plan) {
+    if (bot._currentTask !== initialTask) {
+      bot.chat('Build stopped.');
+      return { placed, failed, skippedOptional, halted: true };
+    }
     if (step.stageName !== currentStage) {
       currentStage = step.stageName;
       bot.chat(`Build stage: ${currentStage.replace(/_/g, ' ')}`);
@@ -578,6 +585,46 @@ function register(bot, goals) {
           `${result.failed > 0 ? `, ${result.failed} failed` : ''}` +
           `${result.skippedOptional > 0 ? `, ${result.skippedOptional} optional skipped` : ''}.`
         );
+      },
+
+      validate_build: async (action) => {
+        const { getBlueprint } = require('./builder');
+        const { validateStructure } = require('./builder_utils');
+        const blueprint = getBlueprint(action.blueprint);
+        if (!blueprint) {
+          bot.chat(`Blueprint not found: ${action.blueprint}`);
+          return;
+        }
+        const origin = new Vec3(action.x, action.y, action.z);
+        const facing = action.facing || 'south';
+        const report = validateStructure(bot, blueprint, origin, facing);
+        bot.chat(`Structure Validation Score: ${report.score}%. Valid: ${report.valid}`);
+        console.log(`[Validation Report]`, report);
+      },
+
+      repair_build: async (action) => {
+        const { getBlueprint } = require('./builder');
+        const { repairStructure } = require('./builder_utils');
+        const blueprint = getBlueprint(action.blueprint);
+        if (!blueprint) {
+          bot.chat(`Blueprint not found: ${action.blueprint}`);
+          return;
+        }
+        const origin = new Vec3(action.x, action.y, action.z);
+        const facing = action.facing || 'south';
+        const success = await repairStructure(bot, goals, blueprint, origin, facing);
+        bot.chat(success ? 'Repairs completed successfully!' : 'Failed to complete repairs.');
+      },
+
+      capture_blueprint: async (action) => {
+        const { captureWorldStructure } = require('./builder_utils');
+        const startPos = new Vec3(action.startX, action.startY, action.startZ);
+        const endPos = new Vec3(action.endX, action.endY, action.endZ);
+        const blueprint = await captureWorldStructure(bot, startPos, endPos, action.name, action.id);
+        const filepath = `./captured_${blueprint.id}.json`;
+        const fs = require('fs');
+        fs.writeFileSync(filepath, JSON.stringify(blueprint, null, 2), 'utf8');
+        bot.chat(`Captured blueprint saved to ${filepath}`);
       },
     },
   };

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft AI Bot Console</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #0b0b0d;
+            --bg-card: #121215;
+            --bg-input: #1a1a1f;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-focus: rgba(255, 255, 255, 0.2);
+            --text-primary: #f3f3f5;
+            --text-secondary: #8b8b93;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-yellow: #f59e0b;
+            --font-main: 'Plus Jakarta Sans', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        header {
+            padding: 16px 24px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-title-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-mark {
+            width: 10px;
+            height: 10px;
+            background: var(--text-primary);
+            transform: rotate(45deg);
+        }
+
+        h1 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-red);
+            position: relative;
+        }
+
+        .status-dot.online {
+            background: var(--accent-green);
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+            }
+            70% {
+                box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr 400px;
+            gap: 20px;
+            padding: 24px;
+            flex: 1;
+            height: calc(100vh - 65px);
+            align-items: stretch;
+            min-height: 0;
+        }
+
+        @media (max-width: 1200px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                height: auto;
+                overflow: visible;
+            }
+        }
+
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .panel-content {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* Panel 1: Stats & Controls */
+        .stat-card {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .stat-value.task {
+            max-width: 160px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--accent-blue);
+        }
+
+        .bar-container {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .bar.health {
+            background: var(--accent-red);
+        }
+
+        .bar.food {
+            background: var(--accent-yellow);
+        }
+
+        .control-input {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+            margin-top: 16px;
+            transition: border-color 0.2s;
+        }
+
+        .control-input:focus {
+            outline: none;
+            border-color: var(--border-focus);
+        }
+
+        .action-button {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: none;
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: opacity 0.2s;
+        }
+
+        .action-button.stop {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .action-button:hover {
+            opacity: 0.9;
+        }
+
+        /* Panel 2: Inventory Grid */
+        .inventory-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 12px;
+        }
+
+        .inventory-item-card {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            min-height: 80px;
+            justify-content: space-between;
+        }
+
+        .item-slot {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .item-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 4px;
+            color: var(--text-primary);
+        }
+
+        .item-count-badge {
+            align-self: flex-end;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .empty-inventory {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            padding: 40px 0;
+        }
+
+        /* Panel 3: Terminal Console */
+        .terminal {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            background: #08080a;
+            border-radius: 8px;
+            padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .log-entry {
+            line-height: 1.4;
+            word-break: break-all;
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+            margin-right: 8px;
+        }
+
+        .log-type {
+            font-weight: 500;
+            margin-right: 8px;
+        }
+
+        .log-entry.chat .log-type { color: var(--accent-blue); }
+        .log-entry.command .log-type { color: var(--accent-green); }
+        .log-entry.error .log-type { color: var(--accent-red); }
+        .log-entry.info .log-type { color: var(--text-secondary); }
+
+        .log-text {
+            color: #d1d1d6;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title-container">
+            <div class="logo-mark"></div>
+            <h1 id="bot-name-title">Minecraft AI Console</h1>
+        </div>
+        <div class="connection-status">
+            <div id="status-indicator" class="status-dot"></div>
+            <span id="status-text">Disconnected</span>
+        </div>
+    </header>
+
+    <div class="dashboard-grid">
+        <!-- Panel 1: Stats & Control -->
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">Bot Metrics & Controls</span>
+            </div>
+            <div class="panel-content">
+                <div class="stat-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span class="stat-label">Health</span>
+                        <span class="stat-value" id="health-value">20/20</span>
+                    </div>
+                    <div class="bar-container">
+                        <div class="bar health" id="health-bar" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <div class="stat-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span class="stat-label">Food</span>
+                        <span class="stat-value" id="food-value">20/20</span>
+                    </div>
+                    <div class="bar-container">
+                        <div class="bar food" id="food-bar" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <span class="stat-label">Coordinates</span>
+                    <span class="stat-value" id="coords-value">0, 0, 0</span>
+                </div>
+
+                <div class="stat-card">
+                    <span class="stat-label">Active Task</span>
+                    <span class="stat-value task" id="task-value">Idle</span>
+                </div>
+
+                <input type="text" id="command-input" class="control-input" placeholder="Type chat or !command..." />
+                
+                <button id="stop-btn" class="action-button stop">Stop Task</button>
+            </div>
+        </div>
+
+        <!-- Panel 2: Inventory -->
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">Inventory Grid</span>
+            </div>
+            <div class="panel-content" id="inventory-container">
+                <div class="empty-inventory">Empty inventory</div>
+            </div>
+        </div>
+
+        <!-- Panel 3: Console Logs -->
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">Live Terminal Logs</span>
+            </div>
+            <div class="panel-content" style="display: flex; flex-direction: column;">
+                <div class="terminal" id="terminal-logs">
+                    <!-- Logs populated via socket -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const botNameTitle = document.getElementById('bot-name-title');
+        const healthValue = document.getElementById('health-value');
+        const healthBar = document.getElementById('health-bar');
+        const foodValue = document.getElementById('food-value');
+        const foodBar = document.getElementById('food-bar');
+        const coordsValue = document.getElementById('coords-value');
+        const taskValue = document.getElementById('task-value');
+        const commandInput = document.getElementById('command-input');
+        const stopBtn = document.getElementById('stop-btn');
+        const inventoryContainer = document.getElementById('inventory-container');
+        const terminalLogs = document.getElementById('terminal-logs');
+
+        socket.on('connect', () => {
+            statusIndicator.className = 'status-dot online';
+            statusText.innerText = 'Online';
+        });
+
+        socket.on('disconnect', () => {
+            statusIndicator.className = 'status-dot';
+            statusText.innerText = 'Disconnected';
+        });
+
+        socket.on('state', (state) => {
+            if (!state || Object.keys(state).length === 0) return;
+
+            botNameTitle.innerText = `${state.username} console`;
+            
+            // Health
+            const health = Math.round(state.health);
+            healthValue.innerText = `${health}/20`;
+            healthBar.style.width = `${(health / 20) * 100}%`;
+
+            // Food
+            const food = Math.round(state.food);
+            foodValue.innerText = `${food}/20`;
+            foodBar.style.width = `${(food / 20) * 100}%`;
+
+            // Coords
+            coordsValue.innerText = `${state.position.x}, ${state.position.y}, ${state.position.z}`;
+
+            // Task
+            taskValue.innerText = state.currentTask;
+
+            // Inventory
+            if (state.inventory && state.inventory.length > 0) {
+                let html = '<div class="inventory-grid">';
+                state.inventory.forEach(item => {
+                    html += `
+                        <div class="inventory-item-card">
+                            <div class="item-slot">Slot ${item.slot}</div>
+                            <div class="item-name" title="${item.name}">${item.name.replace(/_/g, ' ')}</div>
+                            <div class="item-count-badge">${item.count}</div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                inventoryContainer.innerHTML = html;
+            } else {
+                inventoryContainer.innerHTML = '<div class="empty-inventory">Inventory is empty</div>';
+            }
+        });
+
+        // Command inputs
+        commandInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const cmd = commandInput.value.trim();
+                if (cmd) {
+                    socket.emit('command', cmd);
+                    commandInput.value = '';
+                }
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            socket.emit('stop');
+        });
+
+        // Log handler
+        function appendLog(log) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${log.type}`;
+            
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            timeSpan.innerText = log.time;
+
+            const typeSpan = document.createElement('span');
+            typeSpan.className = 'log-type';
+            typeSpan.innerText = `[${log.type.toUpperCase()}]`;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'log-text';
+            textSpan.innerText = log.text;
+
+            entry.appendChild(timeSpan);
+            entry.appendChild(typeSpan);
+            entry.appendChild(textSpan);
+
+            terminalLogs.appendChild(entry);
+            terminalLogs.scrollTop = terminalLogs.scrollHeight;
+        }
+
+        socket.on('log', (log) => {
+            appendLog(log);
+        });
+
+        socket.on('init-logs', (logs) => {
+            terminalLogs.innerHTML = '';
+            logs.forEach(log => appendLog(log));
+        });
+    </script>
+</body>
+</html>

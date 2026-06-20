@@ -9,6 +9,7 @@ const builderModule = require('./builder');
 const inventoryModule = require('./inventory');
 const miningModule = require('./mining');
 const farmingModule = require('./farming');
+const tradingModule = require('./trading');
 
 /**
  * Extract handlers from a module's register() result.
@@ -41,6 +42,7 @@ function createExecutor(bot) {
   const inventory = inventoryModule.register(bot, goals);
   const mining = miningModule.register(bot, goals);
   const farming = farmingModule.register(bot, goals);
+  const trading = tradingModule.register(bot, goals);
 
   // Merge all handlers into a single map (handles both return patterns)
   const allHandlers = {
@@ -50,6 +52,7 @@ function createExecutor(bot) {
     ...extractHandlers(inventory),
     ...extractHandlers(mining),
     ...extractHandlers(farming),
+    ...extractHandlers(trading),
   };
 
   console.log(`📋 Action dispatcher loaded ${Object.keys(allHandlers).length} actions: ${Object.keys(allHandlers).join(', ')}`);

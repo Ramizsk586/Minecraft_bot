@@ -300,107 +300,178 @@ function findBestTier(bot, recipe) {
  */
 function resolveDependencies(bot, targetItem, count = 1) {
   const steps = [];
+  const visited = new Set();
 
-  // Check if it's a tiered item (e.g., "diamond_sword" → tier=diamond, type=sword)
-  let recipe = null;
-  let tier = null;
-  let resolvedMaterial = null;
+  // Initialize virtual inventory
+  const virtualInventory = {};
+  for (const item of bot.inventory.items()) {
+    virtualInventory[item.name] = (virtualInventory[item.name] || 0) + item.count;
+  }
 
-  // Try direct recipe first
-  if (RECIPES[targetItem]) {
-    recipe = RECIPES[targetItem];
-  } else {
-    // Try tiered: extract "tier_type" pattern
-    for (const t of MATERIAL_TIERS) {
-      for (const itemType of TIERED_ITEMS) {
-        if (targetItem === `${t.tier}_${itemType}`) {
-          recipe = RECIPES[`_${itemType}`];
-          tier = t;
-          resolvedMaterial = t.plankBased ? '_planks' : t.material;
-          break;
+  function findAnyOfVirtual(names) {
+    for (const name of names) {
+      if ((virtualInventory[name] || 0) > 0) return name;
+    }
+    return null;
+  }
+
+  // Helper to resolve specific items recursively
+  function resolve(item, qty) {
+    if (qty <= 0) return true;
+
+    // 1. Check coal/charcoal fallback
+    if (item === 'coal') {
+      const coalQty = virtualInventory['coal'] || 0;
+      if (coalQty >= qty) {
+        virtualInventory['coal'] -= qty;
+        return true;
+      } else {
+        const remaining = qty - coalQty;
+        const charcoalQty = virtualInventory['charcoal'] || 0;
+        if (charcoalQty >= remaining) {
+          virtualInventory['coal'] = 0;
+          virtualInventory['charcoal'] -= remaining;
+          return true;
         }
       }
-      if (recipe) break;
     }
-  }
 
-  if (!recipe) return null; // Unknown recipe
-
-  // Resolve each cost component
-  const resolvedCost = {};
-  for (const [key, amount] of Object.entries(recipe.cost)) {
-    const needed = amount * count;
-
-    if (key === '_material') {
-      if (!resolvedMaterial) {
-        // Auto-pick best tier
-        const best = findBestTier(bot, recipe);
-        if (!best) return null; // No materials for any tier
-        resolvedMaterial = best.material;
-        tier = MATERIAL_TIERS.find(t => t.tier === best.tier);
-      }
-      resolvedCost[resolvedMaterial] = needed;
-    } else {
-      resolvedCost[key] = needed;
+    // 2. Check if we already have enough of the exact item
+    let have = virtualInventory[item] || 0;
+    if (have >= qty) {
+      virtualInventory[item] -= qty;
+      return true;
     }
-  }
 
-  // Now check each resolved cost and add dependency steps
-  for (const [material, needed] of Object.entries(resolvedCost)) {
-    const have = material === '_planks'
-      ? countAnyOf(bot, PLANK_TYPES)
-      : material === '_sticks'
-        ? countItem(bot, 'stick')
-        : material === '_logs'
-          ? countAnyOf(bot, LOG_TYPES)
-          : material === 'coal'
-            ? (countItem(bot, 'coal') + countItem(bot, 'charcoal'))
-            : countItem(bot, material);
-
-    const deficit = needed - have;
-    if (deficit <= 0) continue; // Have enough
-
-    // Try to resolve the deficit
-    if (material === '_sticks' || material === 'stick') {
-      // Need sticks: craft from planks (2 planks → 4 sticks)
-      const sticksNeeded = deficit;
-      const craftBatches = Math.ceil(sticksNeeded / 4);
-      const planksNeeded = craftBatches * 2;
-
-      // Check planks
-      const plankHave = countAnyOf(bot, PLANK_TYPES);
-      if (plankHave < planksNeeded) {
-        // Need more planks: craft from logs
-        const plankDeficit = planksNeeded - plankHave;
-        const logBatches = Math.ceil(plankDeficit / 4);
-        if (countAnyOf(bot, LOG_TYPES) < logBatches) {
-          return null; // Not enough logs
+    // Handle wood/plank/stick placeholders
+    if (item === '_planks') {
+      let needed = qty;
+      for (const pType of PLANK_TYPES) {
+        const pQty = virtualInventory[pType] || 0;
+        if (pQty > 0) {
+          const consume = Math.min(needed, pQty);
+          virtualInventory[pType] -= consume;
+          needed -= consume;
+          if (needed === 0) break;
         }
-        steps.push({ action: 'craft', item: 'planks', count: logBatches, reason: `need ${plankDeficit} planks for sticks` });
       }
-      steps.push({ action: 'craft', item: 'stick', count: craftBatches, reason: `need ${sticksNeeded} sticks` });
+      if (needed === 0) return true;
 
-    } else if (material === '_planks') {
-      // Need planks: craft from logs (1 log → 4 planks)
-      const logBatches = Math.ceil(deficit / 4);
-      if (countAnyOf(bot, LOG_TYPES) < logBatches) {
-        return null; // Not enough logs
-      }
-      steps.push({ action: 'craft', item: 'planks', count: logBatches, reason: `need ${deficit} planks` });
-
-    } else if (material === '_logs') {
-      return null; // Can't craft logs, need to mine them
-
-    } else {
-      return null; // Can't auto-resolve this material
+      // If still need more planks, we must craft them
+      let logName = findAnyOfVirtual(LOG_TYPES);
+      let plankName = logName ? (LOG_TO_PLANK[logName] || 'oak_planks') : 'oak_planks';
+      
+      const ok = resolve(plankName, needed);
+      if (!ok) return false;
+      
+      virtualInventory[plankName] -= needed;
+      return true;
     }
+
+    if (item === '_logs') {
+      let needed = qty;
+      for (const lType of LOG_TYPES) {
+        const lQty = virtualInventory[lType] || 0;
+        if (lQty > 0) {
+          const consume = Math.min(needed, lQty);
+          virtualInventory[lType] -= consume;
+          needed -= consume;
+          if (needed === 0) break;
+        }
+      }
+      return needed === 0;
+    }
+
+    if (item === '_sticks') {
+      return resolve('stick', qty);
+    }
+
+    // 3. Not enough in inventory. We must craft it.
+    if (visited.has(item)) return false; // Loop detected
+    visited.add(item);
+
+    let recipe = null;
+    let recipeItemName = item;
+    const libraryData = require('../library/data');
+    
+    // Check if it is a tiered item (e.g. iron_sword)
+    let tier = null;
+    let resolvedMaterial = null;
+    if (RECIPES[item]) {
+      recipe = RECIPES[item];
+    } else {
+      for (const t of MATERIAL_TIERS) {
+        for (const itemType of TIERED_ITEMS) {
+          if (item === `${t.tier}_${itemType}`) {
+            recipe = RECIPES[`_${itemType}`];
+            tier = t;
+            resolvedMaterial = t.plankBased ? '_planks' : t.material;
+            break;
+          }
+        }
+        if (recipe) break;
+      }
+    }
+
+    let recipeInfo = null;
+    if (recipe) {
+      const ingredients = [];
+      for (const [key, amount] of Object.entries(recipe.cost)) {
+        if (key === '_material') {
+          ingredients.push({ item: resolvedMaterial, count: amount });
+        } else {
+          ingredients.push({ item: key, count: amount });
+        }
+      }
+      recipeInfo = {
+        count: recipe.output || 1,
+        ingredients
+      };
+    } else {
+      const registryRecipe = libraryData.getRecipe(item);
+      if (registryRecipe) {
+        recipeInfo = registryRecipe;
+      }
+    }
+
+    if (!recipeInfo) {
+      visited.delete(item);
+      return false; // Cannot craft this item (no recipe)
+    }
+
+    const deficit = qty - have;
+    const batches = Math.ceil(deficit / recipeInfo.count);
+
+    // Resolve ingredients first
+    for (const ing of recipeInfo.ingredients) {
+      const ingNeeded = ing.count * batches;
+      const ok = resolve(ing.item, ingNeeded);
+      if (!ok) {
+        visited.delete(item);
+        return false;
+      }
+    }
+
+    // Add step to list
+    const outputName = tier ? `${tier.tier}_${item.split('_').slice(1).join('_')}` : item;
+    const finalItemName = PLANK_TYPES.includes(outputName) ? 'planks' : outputName;
+    steps.push({
+      action: 'craft',
+      item: finalItemName,
+      count: batches,
+      reason: `need ${qty} ${item}`
+    });
+
+    // Update virtual inventory: add the output of this craft and consume the requested quantity
+    const totalOutput = batches * recipeInfo.count;
+    virtualInventory[item] = (virtualInventory[item] || 0) + totalOutput - qty;
+
+    visited.delete(item);
+    return true;
   }
 
-  // Final step: craft the target item
-  const outputName = tier ? `${tier.tier}_${targetItem.split('_').slice(1).join('_')}` : targetItem;
-  steps.push({ action: 'craft', item: outputName, count, reason: 'target item' });
-
-  return steps;
+  const success = resolve(targetItem, count);
+  return success ? steps : null;
 }
 
 // ─── Crafting Executor ────────────────────────────────────────────────────────
@@ -628,33 +699,40 @@ async function craft(bot, itemName, count = 1, options = {}) {
 
   let table = null;
   let temporaryTableUsed = false;
-  if (needsTable) {
-    const { goals } = require('mineflayer-pathfinder');
-    table = await ensureCraftingTable(bot, goals);
-    if (!table && needsTable) {
-      if (!silent) bot.chat('Need a crafting table but can\'t find or make one!');
-      return { success: false, crafted: null, steps: 0, reason: 'no crafting table' };
+  try {
+    if (needsTable) {
+      const { goals } = require('mineflayer-pathfinder');
+      table = await ensureCraftingTable(bot, goals);
+      if (!table && needsTable) {
+        if (!silent) bot.chat('Need a crafting table but can\'t find or make one!');
+        return { success: false, crafted: null, steps: 0, reason: 'no crafting table' };
+      }
+      temporaryTableUsed = !!table?._temporaryStation;
     }
-    temporaryTableUsed = !!table?._temporaryStation;
-  }
 
-  // Execute each step
-  let completed = 0;
-  for (const step of steps) {
-    const ok = await executeCraftStep(bot, step, table);
-    if (!ok) {
-      if (!silent) bot.chat(`Craft chain failed at step: ${step.item} (${step.reason})`);
-      return { success: false, crafted: step.item, steps: completed, reason: `failed at ${step.item}` };
+    // Execute each step
+    let completed = 0;
+    for (const step of steps) {
+      const ok = await executeCraftStep(bot, step, table);
+      if (!ok) {
+        if (!silent) bot.chat(`Craft chain failed at step: ${step.item} (${step.reason})`);
+        return { success: false, crafted: step.item, steps: completed, reason: `failed at ${step.item}` };
+      }
+      completed++;
+      console.log(`🧠 Brain:Craft step ${completed}/${steps.length}: ${step.item} x${step.count} ✓`);
     }
-    completed++;
-    console.log(`🧠 Brain:Craft step ${completed}/${steps.length}: ${step.item} x${step.count} ✓`);
+
+    const finalItem = steps[steps.length - 1].item;
+    if (!silent) bot.chat(`✅ Crafted ${count}x ${finalItem}!`);
+    console.log(`🧠 Brain:Craft complete → ${count}x ${finalItem}`);
+
+    return { success: true, crafted: finalItem, steps: completed, reason: 'success' };
+  } finally {
+    if (temporaryTableUsed) {
+      const { goals } = require('mineflayer-pathfinder');
+      await cleanupTemporaryStation(bot, 'crafting_table', goals, { silent: true });
+    }
   }
-
-  const finalItem = steps[steps.length - 1].item;
-  if (!silent) bot.chat(`✅ Crafted ${count}x ${finalItem}!`);
-  console.log(`🧠 Brain:Craft complete → ${count}x ${finalItem}`);
-
-  return { success: true, crafted: finalItem, steps: completed, reason: 'success' };
 }
 
 /**

@@ -3,6 +3,12 @@
  * @param {string} name - Input query
  * @returns {string} resolved standard Minecraft name
  */
+let currentBot = null;
+
+function init(bot) {
+  currentBot = bot;
+}
+
 function resolveItemName(name) {
   if (!name) return '';
   const clean = name.trim().toLowerCase().replace(/\s+/g, '_');
@@ -58,9 +64,56 @@ function resolveItemName(name) {
     'apple': 'apple'
   };
 
-  return aliases[clean] || clean;
+  // 1. Check static aliases first
+  if (aliases[clean]) return aliases[clean];
+
+  // 2. Query registry if available
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    if (registry.itemsByName[clean] || registry.blocksByName[clean]) {
+      return clean;
+    }
+
+    // Exact match with alphanumeric and underscores only
+    const replaced = clean.replace(/[^a-z0-9_]/g, '');
+    if (registry.itemsByName[replaced] || registry.blocksByName[replaced]) {
+      return replaced;
+    }
+
+    // Singular/plural adjustment
+    if (clean.endsWith('s')) {
+      const singular = clean.slice(0, -1);
+      if (registry.itemsByName[singular] || registry.blocksByName[singular]) {
+        return singular;
+      }
+    }
+
+    // Fuzzy matching / word overlap
+    const allNames = [...Object.keys(registry.itemsByName), ...Object.keys(registry.blocksByName)];
+    const parts = clean.split('_');
+    let bestMatch = null;
+    let maxOverlap = 0;
+    
+    for (const regName of allNames) {
+      let score = 0;
+      for (const part of parts) {
+        if (regName.includes(part)) score++;
+      }
+      if (score > maxOverlap) {
+        maxOverlap = score;
+        bestMatch = regName;
+      }
+    }
+
+    if (maxOverlap >= parts.length * 0.7 && bestMatch) {
+      return bestMatch;
+    }
+  }
+
+  return clean;
 }
 
 module.exports = {
+  init,
   resolveItemName
 };

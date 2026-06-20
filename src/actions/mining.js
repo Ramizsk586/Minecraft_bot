@@ -327,8 +327,10 @@ function register(bot, goals) {
 
     bot.chat(`Mining ${target} ${blockName}...`);
     let mined = 0;
+    const initialTask = bot._currentTask;
 
     while (mined < target) {
+      if (bot._currentTask !== initialTask) break;
       const block = bot.findBlock({ matching: id, maxDistance: 64 });
       if (!block) {
         bot.chat(`Can't find any more ${blockName} nearby (mined ${mined}/${target}).`);
@@ -457,8 +459,10 @@ function register(bot, goals) {
     const torchId = blockId(bot, 'torch') ?? blockId(bot, 'wall_torch');
 
     bot.chat(`Strip mining ${direction} for ${length} blocks at y=${yLevel}...`);
+    const initialTask = bot._currentTask;
 
     for (let step = 0; step < length; step++) {
+      if (bot._currentTask !== initialTask) break;
       const baseX = startX + offset.x * step;
       const baseZ = startZ + offset.z * step;
       const feetPos = new Vec3(baseX, yLevel, baseZ);
@@ -659,9 +663,11 @@ function register(bot, goals) {
     await ensureMiningTool(bot, logType);
 
     let chopped = 0;
+    const initialTask = bot._currentTask;
 
     // Chop from bottom to top
     for (const logBlock of treeLogs) {
+      if (bot._currentTask !== initialTask) break;
       try {
         const fresh = bot.blockAt(logBlock.position);
         if (fresh && logIdSet.has(fresh.type)) {
@@ -694,8 +700,10 @@ function register(bot, goals) {
 
     let totalWood = 0;
     let treesChopped = 0;
+    const initialTask = bot._currentTask;
 
     for (let i = 0; i < treeCount; i++) {
+      if (bot._currentTask !== initialTask) break;
       const result = await chopTree({});
 
       if (!result) {

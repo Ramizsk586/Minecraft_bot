@@ -5,6 +5,12 @@
 
 'use strict';
 
+let currentBot = null;
+
+function init(bot) {
+  currentBot = bot;
+}
+
 // ─── Tool tier hierarchy (higher level = better) ────────────────────────────
 // Must match craft.js MATERIAL_TIERS levels
 const TIER_LEVELS = {
@@ -184,8 +190,67 @@ for (const color of TERRACOTTA_COLORS) {
  * @param {string} blockName - The block name (e.g., 'iron_ore')
  * @returns {{ tool: string, minTier: string } | null} - Requirements, or null if no tool needed
  */
+/**
+ * Determine the best tool type needed for a block (pickaxe/axe/shovel).
+ * @param {string} blockName
+ * @returns {string|null} - Tool type name, or null if none required
+ */
+function getRequiredToolType(blockName) {
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    const blockInfo = registry.blocksByName[blockName.toLowerCase()];
+    if (blockInfo && blockInfo.harvestTools) {
+      const toolIds = Object.keys(blockInfo.harvestTools);
+      if (toolIds.length > 0) {
+        const firstToolId = toolIds[0];
+        const name = registry.items[firstToolId]?.name || '';
+        for (const type of ['pickaxe', 'axe', 'shovel', 'hoe', 'shears']) {
+          if (name.endsWith(`_${type}`) || name === type) return type;
+        }
+      }
+    }
+  }
+  const req = BLOCK_TOOL_REQUIREMENTS[blockName];
+  return req ? req.tool : null;
+}
+
+/**
+ * Determine the minimum tier name needed for a block.
+ * @param {string} blockName
+ * @returns {string|null} - Tier name (e.g., 'stone'), or null if none required
+ */
+function getMinimumTier(blockName) {
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    const blockInfo = registry.blocksByName[blockName.toLowerCase()];
+    if (blockInfo && blockInfo.harvestTools) {
+      const toolIds = Object.keys(blockInfo.harvestTools);
+      if (toolIds.length > 0) {
+        const toolNames = toolIds.map(id => registry.items[id]?.name).filter(Boolean);
+        for (const tier of [...TIER_ORDER].reverse()) {
+          if (toolNames.some(name => name.startsWith(`${tier}_`))) {
+            return tier;
+          }
+        }
+      }
+    }
+  }
+  const req = BLOCK_TOOL_REQUIREMENTS[blockName];
+  return req ? req.minTier : null;
+}
+
+/**
+ * Get the tool requirement for a block.
+ * @param {string} blockName - The block name (e.g., 'iron_ore')
+ * @returns {{ tool: string, minTier: string } | null} - Requirements, or null if no tool needed
+ */
 function getBlockRequirement(blockName) {
-  return BLOCK_TOOL_REQUIREMENTS[blockName] || null;
+  const tool = getRequiredToolType(blockName);
+  const minTier = getMinimumTier(blockName);
+  if (tool) {
+    return { tool, minTier: minTier || 'wooden' };
+  }
+  return null;
 }
 
 /**
@@ -231,7 +296,7 @@ function checkToolForBlock(toolItem, blockName) {
     };
   }
 
-  const req = BLOCK_TOOL_REQUIREMENTS[blockName];
+  const req = getBlockRequirement(blockName);
 
   // No requirement → can mine with anything and items will drop
   if (!req) {
@@ -250,7 +315,7 @@ function checkToolForBlock(toolItem, blockName) {
   const toolName = toolItem.name;
 
   // Check tool type match
-  const isCorrectTool = toolName.endsWith(`_${req.tool}`);
+  const isCorrectTool = toolName.endsWith(`_${req.tool}`) || toolName === req.tool;
   if (!isCorrectTool) {
     return {
       canMine: true,
@@ -277,26 +342,6 @@ function checkToolForBlock(toolItem, blockName) {
     willDrop: true,
     reason: `${toolName} is sufficient for ${blockName}`,
   };
-}
-
-/**
- * Determine the best tool type needed for a block (pickaxe/axe/shovel).
- * @param {string} blockName
- * @returns {string|null} - Tool type name, or null if none required
- */
-function getRequiredToolType(blockName) {
-  const req = BLOCK_TOOL_REQUIREMENTS[blockName];
-  return req ? req.tool : null;
-}
-
-/**
- * Determine the minimum tier name needed for a block.
- * @param {string} blockName
- * @returns {string|null} - Tier name (e.g., 'stone'), or null if none required
- */
-function getMinimumTier(blockName) {
-  const req = BLOCK_TOOL_REQUIREMENTS[blockName];
-  return req ? req.minTier : null;
 }
 
 /**
@@ -344,6 +389,7 @@ function getNeededToolCraft(bot, blockName, currentTool) {
 }
 
 module.exports = {
+  init,
   TIER_LEVELS,
   TIER_ORDER,
   NEVER_HARVEST_BLOCKS,

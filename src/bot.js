@@ -1,6 +1,8 @@
 require('dotenv').config();
 const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
+const { plugin: pvp } = require('mineflayer-pvp');
+const armorManager = require('mineflayer-armor-manager');
 
 const { normalizeMinecraftVersion, extractJson, sleep, installCompactChat } = require('./utils');
 const { getWorldState } = require('./worldState');
@@ -12,6 +14,8 @@ const libraryWorld = require('./library/world');
 const libraryData = require('./library/data');
 const libraryCalc = require('./library/modules/calc');
 const { resolveItemName } = require('./library/modules/itemNameResolver');
+const miningRules = require('./brain/miningRules');
+const { startDashboardServer } = require('./dashboard/server');
 
 function envValue(name, fallback = '') {
   const value = process.env[name];
@@ -23,7 +27,7 @@ function buildLlmConfig() {
   return {
     provider,
     llmApiBase: envValue('LLM_API_BASE') || (provider === 'ollama'
-      ? 'https://ollama.com/v1'
+      ? 'http://localhost:11434/v1'
       : 'https://openrouter.ai/api/v1'),
     llmApiKey: envValue('MODEL_KEY') || envValue('LLM_API_KEY') || envValue('OPENROUTER_API_KEY'),
     llmModel: envValue('LLM_MODEL') || (provider === 'ollama' ? 'llama3' : 'openai/gpt-4o-mini'),
@@ -177,6 +181,8 @@ function createBot() {
   installCompactChat(bot, { maxLength: parseInt(envValue('CHAT_MAX_LENGTH', '96'), 10) || 96 });
 
   bot.loadPlugin(pathfinder);
+  bot.loadPlugin(pvp);
+  bot.loadPlugin(armorManager);
 
   // Custom state property used by action modules
   bot._currentTask = null;
@@ -208,7 +214,46 @@ function createBot() {
     };
 
     // Initialize the brain (auto-eat, instant command handling, autonomous survival)
+    libraryData.init?.(bot);
+    miningRules.init?.(bot);
+    resolveItemName.init?.(bot);
     brain.init(bot, { owner: config.owner });
+    startDashboardServer(bot, 3000);
+
+    // Initialize the Task Manager if task env is set
+    if (process.env.MC_TASK) {
+      (async () => {
+        try {
+          const { TaskManager } = require('./tasks/taskManager');
+          const taskData = JSON.parse(process.env.MC_TASK);
+          bot.taskManager = new TaskManager(bot, taskData);
+          await bot.taskManager.initialize();
+
+          const taskInterval = setInterval(async () => {
+            if (!bot || !bot.taskManager) {
+              clearInterval(taskInterval);
+              return;
+            }
+            try {
+              const check = await bot.taskManager.checkCompletion();
+              if (check.done) {
+                clearInterval(taskInterval);
+                bot.chat(`[Task Completed] Score: ${check.score} | Reason: ${check.reason}`);
+                await bot.taskManager.teardown();
+                setTimeout(() => {
+                  bot.quit();
+                  process.exit(0);
+                }, 1000);
+              }
+            } catch (err) {
+              console.error('Error checking task completion:', err);
+            }
+          }, 2000);
+        } catch (err) {
+          console.error('Failed to initialize task manager:', err);
+        }
+      })();
+    }
 
     bot.chat(`Hello! I'm ${config.username}, your AI assistant. Type !help to see what I can do.`);
 
@@ -401,7 +446,7 @@ const AUTONOMY_CRAFT_ITEMS = new Set([
 ]);
 
 async function askAI(username, userMessage) {
-  if (!config.llmApiKey) {
+  if (!config.llmApiKey && config.provider !== 'ollama') {
     throw new Error('Missing MODEL_KEY (or legacy LLM_API_KEY / OPENROUTER_API_KEY)');
   }
 
@@ -515,7 +560,7 @@ function sanitizeAutonomyAction(action, depth = 0) {
 }
 
 async function askAutonomousAI(context = {}) {
-  if (!config.llmApiKey) {
+  if (!config.llmApiKey && config.provider !== 'ollama') {
     return { action: 'chat', message: 'AI autonomy disabled: missing model key.' };
   }
 
@@ -537,7 +582,9 @@ async function askAutonomousAI(context = {}) {
   }
 
   const headers = { 'Content-Type': 'application/json' };
-  headers.Authorization = `Bearer ${config.llmApiKey}`;
+  if (config.llmApiKey) {
+    headers.Authorization = `Bearer ${config.llmApiKey}`;
+  }
   if (config.provider !== 'ollama') {
     if (config.llmReferer) headers['HTTP-Referer'] = config.llmReferer;
     if (config.llmTitle) headers['X-Title'] = config.llmTitle;
@@ -678,13 +725,16 @@ async function handleCommand(username, command) {
 
   // ── Brain intercept: handle simple commands instantly ──
   try {
+    bot._currentTask = command;
     const handled = await brain.tryHandle(bot, command);
     if (handled) {
       console.log(`🧠 Brain handled: "${command}"`);
+      bot._currentTask = null;
       return;
     }
   } catch (err) {
     console.log(`🧠 Brain error: ${err.message}`);
+    bot._currentTask = null;
     // Fall through to LLM
   }
 

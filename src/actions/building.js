@@ -1,5 +1,6 @@
 const { sleep } = require('../utils');
 const { Vec3 } = require('vec3');
+const { Movements } = require('mineflayer-pathfinder');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,93 +45,179 @@ async function ensureBlocks(bot, blockName, needed) {
 
 // ─── Improved placeBlockAt ────────────────────────────────────────────────────
 
+// List of blocks that do not collide with the bot (safe to stand inside)
+const DONT_MOVE_FOR = new Set([
+  'torch', 'redstone_torch', 'redstone', 'lever', 'button', 
+  'rail', 'detector_rail', 'powered_rail', 'activator_rail', 
+  'tripwire_hook', 'tripwire', 'water_bucket', 'lava_bucket', 'string',
+  'wheat_seeds', 'pumpkin_seeds', 'melon_seeds', 'beetroot_seeds',
+  'air', 'cave_air'
+]);
+
 /**
- * Place a single block at (x, y, z).
- * - Skips positions that already have a non-air block
- * - Better pathfinding: tries GoalNear(3), falls back to GoalNear(5)
- * - Looks at reference block before placing
- * - Verifies placement after
+ * Place a single block at (x, y, z) with safety and orientation logic.
  * Returns true on success, false on failure.
  */
-async function placeBlockAt(bot, goals, blockName, x, y, z) {
+async function placeBlockAt(bot, goals, blockName, x, y, z, options = {}) {
   try {
-    // 0. Skip if target position already has a non-air block
-    const existing = bot.blockAt(new Vec3(x, y, z));
+    // 1. Resolve target coordinates to integers
+    const tx = Math.floor(x);
+    const ty = Math.floor(y);
+    const tz = Math.floor(z);
+    const targetDest = new Vec3(tx, ty, tz);
+
+    // 2. Skip if target position already has a non-air block
+    const existing = bot.blockAt(targetDest);
     if (existing && !isAir(existing.name)) {
       return true; // Already occupied — treat as success
     }
 
-    // 1. Find the block item in inventory by exact name
+    // 3. Find the block item in inventory by exact name
     const item = bot.inventory.items().find(i => i.name === blockName);
     if (!item) {
       console.log(`placeBlockAt: no ${blockName} in inventory`);
       return false;
     }
 
-    // 2. Equip it
+    // 4. Equip the item
     await bot.equip(item, 'hand');
 
-    // 3. Navigate near — try close first, then wider radius
-    let reachedClose = false;
-    try {
-      await bot.pathfinder.goto(new goals.GoalNear(x, y, z, 3));
-      reachedClose = true;
-    } catch (err) {
-      console.log(`placeBlockAt: close pathfind failed, trying wider: ${err.message}`);
-    }
+    // 5. Distance Safety (GoalInvert): Move away if standing on/inside the target space
+    const pos = bot.entity.position;
+    const posAbove = pos.plus(new Vec3(0, 1, 0));
+    const isTooClose = pos.distanceTo(targetDest) < 1.1 || posAbove.distanceTo(targetDest) < 1.1;
 
-    if (!reachedClose) {
+    if (!DONT_MOVE_FOR.has(blockName) && isTooClose) {
+      console.log(`[Safety] Bot too close to solid placement site (${tx}, ${ty}, ${tz}). Backing away...`);
+      const goalNear = new goals.GoalNear(tx, ty, tz, 2);
+      const invertedGoal = new goals.GoalInvert(goalNear);
+      
+      const oldMovements = bot.pathfinder.movements;
+      bot.pathfinder.setMovements(new Movements(bot));
       try {
-        await bot.pathfinder.goto(new goals.GoalNear(x, y, z, 5));
+        await bot.pathfinder.goto(invertedGoal);
       } catch (err) {
-        console.log(`placeBlockAt: wide pathfind also failed: ${err.message}`);
-        // Continue anyway — we might already be close enough
+        console.log(`[Safety] Flee pathfinding failed/interrupted: ${err.message}`);
+      } finally {
+        bot.pathfinder.setMovements(oldMovements);
       }
     }
 
-    // 4. Find an adjacent solid block to place against
+    // 6. Navigate near — try close first (GoalNear(3)), then wider (GoalNear(5))
+    const distanceToTarget = bot.entity.position.distanceTo(targetDest);
+    if (distanceToTarget > 4.5) {
+      let reachedClose = false;
+      try {
+        await bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, 3));
+        reachedClose = true;
+      } catch (err) {
+        console.log(`placeBlockAt: close pathfind failed, trying wider: ${err.message}`);
+      }
+
+      if (!reachedClose) {
+        try {
+          await bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, 5));
+        } catch (err) {
+          console.log(`placeBlockAt: wide pathfind also failed: ${err.message}`);
+        }
+      }
+    }
+
+    // 7. Find an adjacent solid block to place against
     const offsets = [
-      new Vec3(0, -1, 0),  // below
-      new Vec3(-1, 0, 0),  // west
-      new Vec3(1, 0, 0),   // east
+      new Vec3(0, -1, 0),  // below (places on top face)
       new Vec3(0, 0, -1),  // north
       new Vec3(0, 0, 1),   // south
+      new Vec3(-1, 0, 0),  // west
+      new Vec3(1, 0, 0),   // east
       new Vec3(0, 1, 0),   // above
     ];
 
     let referenceBlock = null;
     let faceVector = null;
 
-    for (const offset of offsets) {
-      const refPos = new Vec3(x + offset.x, y + offset.y, z + offset.z);
-      const block = bot.blockAt(refPos);
-      if (block && !isAir(block.name)) {
-        referenceBlock = block;
-        // Face vector points FROM reference TO target
-        faceVector = new Vec3(-offset.x, -offset.y, -offset.z);
-        break;
+    // Optional: Preferred placement face (e.g., 'top', 'bottom', 'north')
+    if (options.placeOn && options.placeOn !== 'side') {
+      const preferredOffsetMap = {
+        'top': new Vec3(0, -1, 0),
+        'bottom': new Vec3(0, 1, 0),
+        'north': new Vec3(0, 0, 1),
+        'south': new Vec3(0, 0, -1),
+        'east': new Vec3(-1, 0, 0),
+        'west': new Vec3(1, 0, 0)
+      };
+      const prefOffset = preferredOffsetMap[options.placeOn];
+      if (prefOffset) {
+        const refPos = targetDest.plus(prefOffset);
+        const block = bot.blockAt(refPos);
+        if (block && !isAir(block.name)) {
+          referenceBlock = block;
+          faceVector = new Vec3(-prefOffset.x, -prefOffset.y, -prefOffset.z);
+        }
+      }
+    }
+
+    // Fallback: Check all sides
+    if (!referenceBlock) {
+      for (const offset of offsets) {
+        const refPos = targetDest.plus(offset);
+        const block = bot.blockAt(refPos);
+        if (block && !isAir(block.name)) {
+          referenceBlock = block;
+          faceVector = new Vec3(-offset.x, -offset.y, -offset.z);
+          break;
+        }
       }
     }
 
     if (!referenceBlock) {
-      console.log(`placeBlockAt: no adjacent solid block at ${x},${y},${z}`);
+      console.log(`placeBlockAt: no adjacent solid block at ${tx},${ty},${tz}`);
       return false;
     }
 
-    // 5. Look at the reference block before placing
-    await bot.lookAt(referenceBlock.position.offset(0.5, 0.5, 0.5), true);
+    // 8. Look at the face of the reference block
+    const faceCenter = referenceBlock.position.offset(
+      0.5 + faceVector.x * 0.5,
+      0.5 + faceVector.y * 0.5,
+      0.5 + faceVector.z * 0.5
+    );
+    await bot.lookAt(faceCenter, true);
     await sleep(100);
 
-    // 6. Place the block
+    // 9. Handle Orientation for Directional Blocks in Survival
+    if (
+      blockName.includes('stairs') || 
+      blockName.includes('bed') || 
+      blockName.includes('door') || 
+      blockName.includes('repeater')
+    ) {
+      let yaw = bot.entity.yaw;
+      if (options.direction) {
+        const yawMap = { 
+          'south': 0, 
+          'west': Math.PI / 2, 
+          'north': Math.PI, 
+          'east': 3 * Math.PI / 2 
+        };
+        if (yawMap[options.direction] !== undefined) {
+          yaw = yawMap[options.direction];
+        }
+      }
+      // Force looking horizontally in the target direction so block places facing correctly
+      await bot.look(yaw, 0, true);
+      await sleep(100);
+    }
+
+    // 10. Place the block
     await bot.placeBlock(referenceBlock, faceVector);
     await sleep(250);
 
-    // 7. Verify placement
-    const placed = bot.blockAt(new Vec3(x, y, z));
+    // 11. Verify placement
+    const placed = bot.blockAt(targetDest);
     if (placed && !isAir(placed.name)) {
       return true;
     } else {
-      console.log(`placeBlockAt: verification failed at ${x},${y},${z} — block is ${placed?.name}`);
+      console.log(`placeBlockAt: verification failed at ${tx},${ty},${tz} — block is ${placed?.name}`);
       return false;
     }
   } catch (err) {
@@ -306,8 +393,10 @@ async function buildFromTemplate(bot, goals, templateBlocks) {
   let placed = 0;
   let failed = 0;
   let skipped = 0;
+  const initialTask = bot._currentTask;
 
   for (const b of sorted) {
+    if (bot._currentTask !== initialTask) break;
     // Check if already occupied
     const existing = bot.blockAt(new Vec3(b.x, b.y, b.z));
     if (existing && !isAir(existing.name)) {
@@ -399,14 +488,18 @@ function register(bot, goals) {
 
     let placed = 0;
     let failed = 0;
+    const initialTask = bot._currentTask;
 
     for (let dy = 0; dy < height; dy++) {
+      if (bot._currentTask !== initialTask) break;
       const y = baseY + dy;
 
       for (let dx = 0; dx < width; dx++) {
+        if (bot._currentTask !== initialTask) break;
         const x = startX + dx;
 
         for (let dz = 0; dz < depth; dz++) {
+          if (bot._currentTask !== initialTask) break;
           const z = startZ + dz;
 
           let shouldPlace = false;
@@ -471,10 +564,14 @@ function register(bot, goals) {
     let placed = 0;
     let skipped = 0;
     let failed = 0;
+    const initialTask = bot._currentTask;
 
     for (let y = minY; y <= maxY; y++) {
+      if (bot._currentTask !== initialTask) break;
       for (let x = minX; x <= maxX; x++) {
+        if (bot._currentTask !== initialTask) break;
         for (let z = minZ; z <= maxZ; z++) {
+          if (bot._currentTask !== initialTask) break;
           const existingBlock = bot.blockAt(new Vec3(x, y, z));
           if (existingBlock && existingBlock.name === blockName) {
             skipped++;
@@ -580,11 +677,15 @@ function register(bot, goals) {
     let mined = 0;
     let skipped = 0;
     let failed = 0;
+    const initialTask = bot._currentTask;
 
     // Clear top-down so blocks above don't fall onto work area
     for (let y = maxY; y >= minY; y--) {
+      if (bot._currentTask !== initialTask) break;
       for (let x = minX; x <= maxX; x++) {
+        if (bot._currentTask !== initialTask) break;
         for (let z = minZ; z <= maxZ; z++) {
+          if (bot._currentTask !== initialTask) break;
           const block = bot.blockAt(new Vec3(x, y, z));
           if (!block || isAir(block.name)) {
             skipped++;

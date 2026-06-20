@@ -141,11 +141,29 @@ async function smeltItem(bot, inputName, count = 1) {
 
   try {
     const furnace = await bot.openFurnace(station);
-    await furnace.putInput(input.type, input.metadata, Math.min(input.count, count));
-    await furnace.putFuel(fuel.type, fuel.metadata, Math.max(1, Math.ceil(count / 8)));
+    const amountToSmelt = Math.min(input.count, count);
+    await furnace.putInput(input.type, input.metadata, amountToSmelt);
+    await furnace.putFuel(fuel.type, fuel.metadata, Math.max(1, Math.ceil(amountToSmelt / 8)));
+    
+    // Wait for smelting to complete
+    const startTime = Date.now();
+    const timeoutMs = amountToSmelt * 10000 + 5000; // 10s per item + 5s buffer
+    
+    while ((Date.now() - startTime) < timeoutMs) {
+      await sleep(1000);
+      const outputSlot = furnace.slots[2];
+      const inputSlot = furnace.slots[0];
+      
+      if (outputSlot && outputSlot.count >= amountToSmelt) {
+        break;
+      }
+      if (!inputSlot && outputSlot && outputSlot.count > 0) {
+        break;
+      }
+    }
+
     await furnace.takeOutput().catch(() => {});
     furnace.close();
-    await sleep(1200);
     await collectTemporaryFurnace(bot).catch(() => {});
     return { success: true, reason: 'smelting completed', station: station.name };
   } catch (err) {
@@ -154,13 +172,49 @@ async function smeltItem(bot, inputName, count = 1) {
 }
 
 async function cookBestFood(bot) {
-  const best = cookData.getBestCookableFood(bot);
+  let best = null;
+  if (bot.taskManager) {
+    const targets = bot.taskManager.getTargets();
+    const rawFood = bot.inventory.items().find(item => {
+      const info = cookData.getCookableFoodInfo(item.name);
+      return info && targets.includes(info.result);
+    });
+    if (rawFood) {
+      best = {
+        item: rawFood,
+        info: cookData.getCookableFoodInfo(rawFood.name)
+      };
+    }
+  }
+
+  if (!best) {
+    best = cookData.getBestCookableFood(bot);
+  }
+
   if (!best) return { success: false, reason: 'no cookable food' };
   return smeltItem(bot, best.item.name, Math.min(best.item.count, best.info.batchGoal || best.item.count));
 }
 
 async function smeltBestOre(bot) {
-  const best = cookData.getBestCookableOre(bot);
+  let best = null;
+  if (bot.taskManager) {
+    const targets = bot.taskManager.getTargets();
+    const rawOre = bot.inventory.items().find(item => {
+      const info = cookData.getOreCookingInfo(item.name);
+      return info && targets.includes(info.result);
+    });
+    if (rawOre) {
+      best = {
+        item: rawOre,
+        info: cookData.getOreCookingInfo(rawOre.name)
+      };
+    }
+  }
+
+  if (!best) {
+    best = cookData.getBestCookableOre(bot);
+  }
+
   if (!best) return { success: false, reason: 'no smeltable ore' };
   return smeltItem(bot, best.item.name, Math.min(best.item.count, best.info.batchGoal || best.item.count));
 }
