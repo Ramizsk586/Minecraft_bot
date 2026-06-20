@@ -489,30 +489,41 @@ async function recoverHole(bot) {
   const hasTowerBlock = await equipTowerBlock(bot);
   if (hasTowerBlock) {
     log('  Towering up…');
-    // Tower up: jump, look down at feet, place block, repeat
+    // Look straight down instantly (force=true) before we start towering
+    try {
+      await bot.look(bot.entity.yaw, Math.PI / 2, true);
+    } catch (_) {}
+
     for (let layer = 0; layer < 30; layer++) {
-      bot.setControlState('jump', true);
-      await sleep(250);
-      bot.setControlState('jump', false);
+      const activeBlock = await equipTowerBlock(bot);
+      if (!activeBlock) break;
 
       const curY = Math.floor(bot.entity.position.y);
-      if (curY > startY + layer + 1) {
+      const referenceBlock = blockAt(bot, Math.floor(bot.entity.position.x), curY - 1, Math.floor(bot.entity.position.z));
+      if (!referenceBlock) break;
+
+      // Start jump
+      bot.setControlState('jump', true);
+      // Wait for bot to clear block below (150ms is optimal)
+      await sleep(150);
+
+      // Place block below
+      try {
+        await bot.placeBlock(referenceBlock, new bot.registry.Vec3(0, 1, 0));
+      } catch (e) {
+        warn(`Place failed: ${e.message}`);
+      }
+
+      // Stop jump
+      bot.setControlState('jump', false);
+      // Wait for landing
+      await sleep(250);
+
+      const newY = Math.floor(bot.entity.position.y);
+      if (newY > startY + layer + 1) {
         // Escaped!
         break;
       }
-      // Look down to place block below
-      try {
-        await bot.look(bot.entity.yaw, Math.PI / 2); // look straight down
-        const referenceBlock = blockAt(bot, Math.floor(p.x), curY - 1, Math.floor(p.z));
-        if (referenceBlock) {
-          await bot.placeBlock(referenceBlock, new bot.registry.Vec3(0, 1, 0));
-        }
-      } catch (e) { warn(`Place failed: ${e.message}`); }
-      await sleep(150);
-
-      // Re-equip if we consumed the last of that type
-      if (!findTowerBlock(bot)) break;
-      await equipTowerBlock(bot);
     }
   } else {
     log('  No tower blocks – attempting staircase dig…');

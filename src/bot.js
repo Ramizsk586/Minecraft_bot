@@ -28,16 +28,116 @@ const config = {
   llmTitle: process.env.OPENROUTER_APP_NAME || 'Minecraft AI Bot',
 };
 
+const MAX_AI_EMPTY_RETRIES = 2;
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let bot;
 let conversationHistory = [];
 let isThinking = false;
 let executeAction = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let reconnectDelayOverrideMs = null;
+let pendingResumeTask = null;
+
+function shouldPersistActionPlan(action) {
+  if (!action || typeof action !== 'object') return false;
+  const resumableActions = new Set([
+    'sequence',
+    'build_house',
+    'house_plan',
+    'build',
+    'fill',
+    'place',
+    'mine',
+    'strip_mine',
+    'chop_tree',
+    'gather_wood',
+    'farm_cycle',
+    'create_farm',
+    'harvest',
+    'plant',
+  ]);
+  return resumableActions.has(action.action);
+}
+
+function setPendingResumeTask(command, action, meta = {}) {
+  if (!shouldPersistActionPlan(action)) {
+    pendingResumeTask = null;
+    return;
+  }
+
+  pendingResumeTask = {
+    type: 'action',
+    command,
+    action,
+    createdAt: Date.now(),
+    source: meta.source || 'user',
+    username: meta.username || null,
+  };
+}
+
+function clearPendingResumeTask() {
+  pendingResumeTask = null;
+}
+
+async function resumePendingTaskIfNeeded() {
+  if (!pendingResumeTask || !executeAction || !bot) return;
+  if (isThinking || bot._resumingTask) return;
+
+  const task = pendingResumeTask;
+  bot._resumingTask = true;
+  bot._currentTask = `resume:${task.command}`;
+  bot.lastInteractionTime = Date.now();
+
+  try {
+    await sleep(2500);
+    bot.chat(`Resuming my last task: ${task.command}`);
+    await executeAction(task.action);
+    clearPendingResumeTask();
+  } catch (err) {
+    console.error('Resume task failed:', err);
+    bot.chat(`I couldn't fully resume "${task.command}".`);
+  } finally {
+    if (bot && bot._currentTask === `resume:${task.command}`) {
+      bot._currentTask = null;
+    }
+    if (bot) {
+      bot._resumingTask = false;
+      bot.lastInteractionTime = Date.now();
+    }
+  }
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(reason = 'disconnect', delayMs = 5000) {
+  if (reconnectTimer) {
+    console.log(`Reconnect already scheduled, skipping duplicate request (${reason}).`);
+    return;
+  }
+
+  reconnectAttempt += 1;
+  const finalDelay = reconnectDelayOverrideMs ?? delayMs;
+  reconnectDelayOverrideMs = null;
+
+  console.log(`Disconnected (${reason}). Reconnecting in ${Math.round(finalDelay / 1000)}s...`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    createBot();
+  }, finalDelay);
+}
 
 // ─── Create Bot ───────────────────────────────────────────────────────────────
 
 function createBot() {
+  clearReconnectTimer();
   bot = mineflayer.createBot({
     host: config.host,
     port: config.port,
@@ -53,6 +153,7 @@ function createBot() {
 
   bot.once('spawn', () => {
     console.log(`✅ ${config.username} spawned in the world`);
+    reconnectAttempt = 0;
     const defaultMove = new Movements(bot);
     defaultMove.canSwim = true;
     defaultMove.allowSprinting = true;
@@ -77,6 +178,14 @@ function createBot() {
     brain.init(bot, { owner: config.owner });
 
     bot.chat(`Hello! I'm ${config.username}, your AI assistant. Type !help to see what I can do.`);
+
+    if (pendingResumeTask) {
+      setTimeout(() => {
+        resumePendingTaskIfNeeded().catch(err => {
+          console.error('Deferred resume failed:', err);
+        });
+      }, 1000);
+    }
   });
 
   bot.on('chat', async (username, message) => {
@@ -108,14 +217,25 @@ function createBot() {
     bot.chat('I died! Ready for new commands.');
   });
 
-  bot.on('kicked', (reason) => console.log('Kicked:', reason));
+  bot.on('kicked', (reason) => {
+    const reasonText = typeof reason === 'string' ? reason : JSON.stringify(reason);
+    console.log('Kicked:', reasonText);
+
+    if (reasonText.includes('multiplayer.disconnect.duplicate_login')) {
+      reconnectDelayOverrideMs = 15000;
+      console.log('Duplicate login detected. Waiting longer before reconnecting.');
+    }
+  });
   bot.on('error', (err) => console.error('Bot error:', err));
 
   bot.on('end', () => {
-    console.log('Disconnected. Reconnecting in 5s...');
+    const interruptedTask = bot._currentTask;
+    if (!pendingResumeTask && interruptedTask && !String(interruptedTask).startsWith('cortex:') && !String(interruptedTask).startsWith('autonomy:')) {
+      pendingResumeTask = null;
+    }
     bot._currentTask = null;
     brain.shutdown();
-    setTimeout(createBot, 5000);
+    scheduleReconnect('end', 5000);
   });
 }
 
@@ -202,35 +322,48 @@ async function askAI(username, userMessage) {
     conversationHistory = conversationHistory.slice(-20);
   }
 
-  const response = await fetch(`${config.llmApiBase}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.llmApiKey}`,
-      'Content-Type': 'application/json',
-      ...(config.llmReferer ? { 'HTTP-Referer': config.llmReferer } : {}),
-      ...(config.llmTitle ? { 'X-Title': config.llmTitle } : {}),
-    },
-    body: JSON.stringify({
-      model: config.llmModel,
-      max_tokens: 1024,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...conversationHistory,
-      ],
-    }),
-  });
+  let raw = '';
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM request failed (${response.status}): ${errorText}`);
+  for (let attempt = 0; attempt <= MAX_AI_EMPTY_RETRIES; attempt++) {
+    const response = await fetch(`${config.llmApiBase}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.llmApiKey}`,
+        'Content-Type': 'application/json',
+        ...(config.llmReferer ? { 'HTTP-Referer': config.llmReferer } : {}),
+        ...(config.llmTitle ? { 'X-Title': config.llmTitle } : {}),
+      },
+      body: JSON.stringify({
+        model: config.llmModel,
+        max_tokens: 1024,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...conversationHistory,
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LLM request failed (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    raw = data?.choices?.[0]?.message?.content?.trim() || '';
+
+    if (raw) {
+      break;
+    }
+
+    if (attempt < MAX_AI_EMPTY_RETRIES) {
+      console.warn(`AI returned empty response (attempt ${attempt + 1}/${MAX_AI_EMPTY_RETRIES + 1}), retrying...`);
+      await sleep(600 * (attempt + 1));
+    }
   }
 
-  const data = await response.json();
-  const raw = data?.choices?.[0]?.message?.content?.trim();
-
   if (!raw) {
-    throw new Error('LLM returned an empty response');
+    throw new Error(`LLM returned an empty response after ${MAX_AI_EMPTY_RETRIES + 1} attempts`);
   }
 
   conversationHistory.push({
@@ -261,6 +394,7 @@ async function handleCommand(username, command) {
   if (command === 'stop') {
     bot.pathfinder.setGoal(null);
     bot._currentTask = null;
+    clearPendingResumeTask();
     bot.chat('Stopped everything.');
     return;
   }
@@ -275,6 +409,7 @@ async function handleCommand(username, command) {
   if (command === 'reset') {
     conversationHistory = [];
     bot._currentTask = null;
+    clearPendingResumeTask();
     bot.chat('Memory cleared, ready for new tasks!');
     return;
   }
@@ -310,6 +445,7 @@ async function handleCommand(username, command) {
   // ── LLM path: complex commands ──
   bot.chat(`Thinking about: "${command}"...`);
   isThinking = true;
+  bot.isThinking = true;
   bot._currentTask = command;
 
   try {
@@ -323,16 +459,24 @@ async function handleCommand(username, command) {
       bot.chat("Hmm, I got confused. Let me try again...");
       console.error('Failed to parse AI response:', raw);
       isThinking = false;
+      bot.isThinking = false;
       return;
     }
 
+    setPendingResumeTask(command, parsed, { source: 'llm', username });
     await executeAction(parsed);
+    clearPendingResumeTask();
 
   } catch (err) {
     console.error('AI error:', err);
-    bot.chat('Something went wrong with my brain. Try again!');
+    if (String(err.message || '').includes('empty response')) {
+      bot.chat("My AI brain returned an empty plan. Please try the command again, or use a simpler command.");
+    } else {
+      bot.chat('Something went wrong with my brain. Try again!');
+    }
   } finally {
     isThinking = false;
+    bot.isThinking = false;
     if (bot._currentTask === command) bot._currentTask = null;
     bot.lastInteractionTime = Date.now();
   }

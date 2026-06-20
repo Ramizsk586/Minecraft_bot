@@ -180,7 +180,8 @@ function getArmorScore() {
 function getWeaponScore() {
   const weapon = attackBrain.pickBestWeapon(_bot);
   if (!weapon) return 0.3; // Fists
-  const name = weapon.name;
+  const name = weapon.item?.name || weapon.name || '';
+  if (!name) return 0.3;
   if (name.includes('netherite') || name.includes('diamond')) return 1.0;
   if (name.includes('iron')) return 0.8;
   if (name.includes('stone')) return 0.6;
@@ -339,6 +340,39 @@ function selectAction(situation) {
             await craftBrain.craftFoodIfPossible(_bot, { silent: true });
           } catch {}
           await eatBrain.eat(_bot, { silent: false, force: true });
+        }
+      },
+    });
+  }
+
+  // ── 5a. Night Off-Hand Torch ──
+  const offHandItem = _bot.inventory.slots[45];
+  const holdingTorch = offHandItem && offHandItem.name === 'torch';
+  if (isNight && !holdingTorch && !inCombat) {
+    actions.push({
+      name: 'equip_torch_night',
+      priority: PRIORITIES.night_safety + 5,
+      maxDuration: 5000,
+      execute: async () => {
+        let torchItem = _bot.inventory.items().find(i => i.name === 'torch');
+        if (!torchItem) {
+          // Try to craft torches (using coal/charcoal)
+          const steps = craftBrain.resolveDependencies(_bot, 'torch', 1);
+          if (steps) {
+            announce('craft_torch', '💡 Crafting torches for night visibility...', 15000);
+            const craftResult = await craftBrain.craft(_bot, 'torch', 1, { silent: true });
+            if (craftResult && craftResult.success) {
+              torchItem = _bot.inventory.items().find(i => i.name === 'torch');
+            }
+          }
+        }
+        if (torchItem) {
+          announce('equip_torch', '💡 Equipping torch in off-hand for light.', 15000);
+          try {
+            await _bot.equip(torchItem, 'off-hand');
+          } catch (err) {
+            log(`Failed to equip torch in off-hand: ${err.message}`);
+          }
         }
       },
     });
@@ -688,9 +722,10 @@ async function handleToolProgression() {
 }
 
 function canUpgradeTools() {
-  const pickaxe = _bot.inventory.items().find(i => i.name.endsWith('_pickaxe'));
+  const pickaxe = _bot.inventory.items().find(i => i?.name?.endsWith('_pickaxe'));
   if (!pickaxe) return false;
-  const name = pickaxe.name;
+  const name = pickaxe.name || '';
+  if (!name) return false;
 
   // Already at iron or better
   if (name.includes('iron') || name.includes('diamond') || name.includes('netherite')) return false;

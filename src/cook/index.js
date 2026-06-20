@@ -23,23 +23,67 @@ async function ensureFurnacePlaced(bot) {
   const nearby = findNearbyCookingBlock(bot);
   if (nearby) return nearby;
 
-  const furnaceItem = bot.inventory.items().find(item => item.name === 'furnace');
+  let furnaceItem = bot.inventory.items().find(item => item.name === 'furnace');
+  if (!furnaceItem) {
+    // Try to craft a furnace (8 cobblestone)
+    const craftBrain = require('../brain/craft');
+    const steps = craftBrain.resolveDependencies(bot, 'furnace', 1);
+    if (steps) {
+      bot.chat('🔧 Furnace not found in inventory. Auto-crafting a furnace...');
+      const craftResult = await craftBrain.craft(bot, 'furnace', 1, { silent: true });
+      if (craftResult && craftResult.success) {
+        furnaceItem = bot.inventory.items().find(item => item.name === 'furnace');
+      }
+    }
+  }
+
   if (!furnaceItem) return null;
 
-  const ref = bot.findBlock({
-    matching: block => ['grass_block', 'dirt', 'stone', 'cobblestone', 'oak_planks'].includes(block.name),
-    maxDistance: 4,
-  });
-  if (!ref) return null;
+  const pos = bot.entity.position.floored();
+  const targetPos = pos.offset(1, 0, 0);
+  const targetBlock = bot.blockAt(targetPos);
 
   try {
-    await bot.equip(furnaceItem, 'hand');
-    await bot.placeBlock(ref, new Vec3(0, 1, 0));
-    await sleep(400);
-    return bot.blockAt(ref.position.offset(0, 1, 0));
-  } catch {
-    return null;
+    // If there's a block in the way, dig it!
+    if (targetBlock && targetBlock.name !== 'air' && targetBlock.name !== 'cave_air' && targetBlock.name !== 'water' && targetBlock.name !== 'lava') {
+      console.log(`[Cooking] Target place block ${targetBlock.name} at ${targetPos} is solid. Digging it first...`);
+      const { findBestTool } = require('../utils');
+      const tool = findBestTool(bot, targetBlock.name);
+      if (tool) {
+        await bot.equip(tool, 'hand');
+      }
+      await bot.dig(targetBlock);
+      await sleep(500);
+    }
+
+    const placeOn = bot.blockAt(targetPos.offset(0, -1, 0));
+    if (placeOn && placeOn.name !== 'air') {
+      await bot.equip(furnaceItem, 'hand');
+      await bot.placeBlock(placeOn, new Vec3(0, 1, 0));
+      await sleep(400);
+      return bot.blockAt(targetPos);
+    }
+  } catch (err) {
+    console.log(`[Cooking] Place furnace failed: ${err.message}`);
   }
+  return null;
+}
+
+async function ensureFuel(bot) {
+  let fuel = pickFuel(bot);
+  if (fuel) return fuel;
+
+  // No fuel available. Let's try to craft planks from logs!
+  const craftBrain = require('../brain/craft');
+  const logs = craftBrain.countAnyOf(bot, craftBrain.LOG_TYPES);
+  if (logs > 0) {
+    bot.chat('🔧 No furnace fuel. Crafting planks from logs...');
+    const result = await craftBrain.craft(bot, 'planks', 1, { silent: true });
+    if (result && result.success) {
+      fuel = pickFuel(bot);
+    }
+  }
+  return fuel;
 }
 
 async function smeltItem(bot, inputName, count = 1) {
@@ -48,7 +92,7 @@ async function smeltItem(bot, inputName, count = 1) {
     return { success: false, reason: 'missing input' };
   }
 
-  const fuel = pickFuel(bot);
+  const fuel = await ensureFuel(bot);
   if (!fuel) {
     return { success: false, reason: 'missing fuel' };
   }

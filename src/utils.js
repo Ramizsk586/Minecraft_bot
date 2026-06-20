@@ -1,5 +1,7 @@
 // ─── Shared Utilities ─────────────────────────────────────────────────────────
 
+const miningRules = require('./brain/miningRules');
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -64,19 +66,36 @@ const TOOL_FOR_BLOCK = {
 
 const TOOL_TIERS = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'wooden'];
 
+function inferPreferredToolType(blockName = '') {
+  if (TOOL_FOR_BLOCK[blockName]) return TOOL_FOR_BLOCK[blockName];
+  if (blockName.includes('log') || blockName.includes('wood') || blockName.includes('planks')) return 'axe';
+  if (blockName.includes('leaves') || blockName.includes('wool')) return 'shears';
+  if (['dirt', 'grass_block', 'sand', 'gravel', 'clay', 'mud', 'snow', 'snow_block'].includes(blockName)) return 'shovel';
+  if (blockName.includes('ore') || blockName.includes('stone') || blockName.includes('deepslate') || blockName.includes('brick')) return 'pickaxe';
+  return null;
+}
+
 /**
  * Find the best tool in inventory for a given block name.
  * Returns the inventory item or null.
  */
 function findBestTool(bot, blockName) {
-  const toolType = TOOL_FOR_BLOCK[blockName];
+  const requirement = miningRules.getBlockRequirement(blockName);
+  const toolType = requirement?.tool || inferPreferredToolType(blockName);
   if (!toolType) return null;
 
   const items = bot.inventory.items();
   for (const tier of TOOL_TIERS) {
     const toolName = `${tier}_${toolType}`;
     const found = items.find(i => i.name === toolName);
-    if (found) return found;
+    if (!found) continue;
+
+    if (requirement) {
+      const check = miningRules.checkToolForBlock(found, blockName);
+      if (!check.willDrop) continue;
+    }
+
+    return found;
   }
   return null;
 }
@@ -156,5 +175,6 @@ module.exports = {
   collectDrops,
   TOOL_FOR_BLOCK,
   TOOL_TIERS,
+  inferPreferredToolType,
   FOOD_PRIORITY,
 };

@@ -247,7 +247,9 @@ function resolveDependencies(bot, targetItem, count = 1) {
         ? countItem(bot, 'stick')
         : material === '_logs'
           ? countAnyOf(bot, LOG_TYPES)
-          : countItem(bot, material);
+          : material === 'coal'
+            ? (countItem(bot, 'coal') + countItem(bot, 'charcoal'))
+            : countItem(bot, material);
 
     const deficit = needed - have;
     if (deficit <= 0) continue; // Have enough
@@ -387,11 +389,25 @@ async function ensureCraftingTable(bot, goals) {
     const tableItem = findItemSlot(bot, 'crafting_table');
     if (tableItem) {
       try {
-        await bot.equip(tableItem, 'hand');
-        // Find a block to place on (below bot)
         const pos = bot.entity.position.floored();
-        const placeOn = bot.blockAt(pos.offset(1, -1, 0));
+        const targetPos = pos.offset(1, 0, 0);
+        const targetBlock = bot.blockAt(targetPos);
+
+        // If targetPos is occupied by a solid block, dig it first!
+        if (targetBlock && targetBlock.name !== 'air' && targetBlock.name !== 'cave_air' && targetBlock.name !== 'water' && targetBlock.name !== 'lava') {
+          console.log(`[Crafting] Target place block ${targetBlock.name} at ${targetPos} is solid. Digging it first...`);
+          const { findBestTool, sleep } = require('../utils');
+          const tool = findBestTool(bot, targetBlock.name);
+          if (tool) {
+            await bot.equip(tool, 'hand');
+          }
+          await bot.dig(targetBlock);
+          await sleep(500);
+        }
+
+        const placeOn = bot.blockAt(targetPos.offset(0, -1, 0));
         if (placeOn && placeOn.name !== 'air') {
+          await bot.equip(tableItem, 'hand');
           const { Vec3 } = require('vec3');
           await bot.placeBlock(placeOn, new Vec3(0, 1, 0));
           bot.chat('📦 Placed crafting table.');
@@ -764,6 +780,9 @@ function showMissingMaterials(bot, itemName, count = 1) {
     } else if (key === '_logs') {
       displayName = 'logs';
       have = countAnyOf(bot, LOG_TYPES);
+    } else if (key === 'coal') {
+      displayName = 'coal/charcoal';
+      have = countItem(bot, 'coal') + countItem(bot, 'charcoal');
     } else {
       have = countItem(bot, key);
     }

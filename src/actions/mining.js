@@ -2,6 +2,8 @@
 
 const { Vec3 } = require('vec3');
 const { sleep, findBestTool, collectDrops } = require('../utils');
+const miningRules = require('../brain/miningRules');
+const craftBrain = require('../brain/craft');
 
 // All log types for tree detection
 const LOG_TYPES = [
@@ -59,6 +61,17 @@ async function equipBestTool(bot, blockName) {
     }
   }
   return tool;
+}
+
+async function equipToolItem(bot, toolItem) {
+  if (!toolItem) return null;
+  try {
+    await bot.equip(toolItem, 'hand');
+    return toolItem;
+  } catch (err) {
+    console.log(`Failed to equip ${toolItem.name}: ${err.message}`);
+    return null;
+  }
 }
 
 async function moveIntoDigRange(bot, goals, block) {
@@ -159,6 +172,132 @@ function findWholeTree(bot, rootBlock) {
 
 function register(bot, goals) {
 
+  /**
+   * Check if we can craft a better tool of the given type, and if so, craft and equip it.
+   */
+  async function tryUpgradeTool(toolType, currentTool) {
+    const currentTier = currentTool ? currentTool.name.split('_')[0] : 'hand';
+    const currentLevel = miningRules.getTierLevel(currentTier) || 0;
+
+    // Check tiers from best to worst to find the highest upgrade we can craft
+    for (const tier of miningRules.TIER_ORDER) {
+      const level = miningRules.getTierLevel(tier) || 0;
+      if (level <= currentLevel) continue; // Only upgrade
+      if (tier === 'netherite') continue; // Cannot craft netherite directly
+
+      const toolName = `${tier}_${toolType}`;
+
+      // Check if we can craft it
+      const steps = craftBrain.resolveDependencies(bot, toolName, 1);
+      if (steps) {
+        bot.chat(`🔧 Upgrading tool: crafting ${toolName} to speed up mining...`);
+        const result = await craftBrain.craft(bot, toolName, 1, { silent: false });
+        if (result && result.success) {
+          const craftedTool = bot.inventory.items().find(i => i.name === toolName);
+          const equipped = await equipToolItem(bot, craftedTool);
+          if (equipped) return equipped;
+        }
+      }
+    }
+    return currentTool;
+  }
+
+  /**
+   * Ensures the bot has the best possible tool equipped for mining `blockName`.
+   * Also checks if we can craft/upgrade to a better tool.
+   * Enforces that the block cannot be mined without meeting drop requirements.
+   */
+  async function ensureMiningTool(bot, blockName) {
+    const blockReq = miningRules.getBlockRequirement(blockName);
+    const toolType = blockReq ? blockReq.tool : getToolTypeForBlock(blockName);
+
+    // Equip best tool in inventory
+    let currentTool = await equipBestTool(bot, blockName);
+
+    // Try upgrading/crafting a replacement/upgraded tool
+    currentTool = await tryUpgradeTool(toolType, currentTool);
+
+    // Enforce drop requirements
+    if (blockReq) {
+      const check = miningRules.checkToolForBlock(currentTool, blockName);
+      if (!check.willDrop) {
+        bot.chat(`⚠️ Cannot mine ${blockName} without a suitable tool (${check.reason}).`);
+        return null;
+      }
+    }
+
+    return currentTool;
+  }
+
+  /**
+   * Check if the light level is low at the bot's position and place a torch if we have one.
+   * If we don't have a torch, try to craft some first!
+   */
+  async function placeTorchForLight(bot) {
+    const pos = bot.entity.position.floored();
+    const block = bot.blockAt(pos);
+    if (!block) return;
+
+    // Check light levels: Y < 60 or skyLight === 0, and total light < 5
+    const isUnderground = pos.y < 60 || block.skyLight === 0;
+    if (!isUnderground || block.light >= 5) return;
+
+    // Check if we already have torches
+    let torchItem = bot.inventory.items().find(i => i.name === 'torch');
+    if (!torchItem) {
+      // Try to craft torches (1 stick + 1 coal/charcoal -> 4 torches)
+      const steps = craftBrain.resolveDependencies(bot, 'torch', 1);
+      if (steps) {
+        bot.chat('💡 It is dark underground. Crafting torches...');
+        const craftResult = await craftBrain.craft(bot, 'torch', 1, { silent: true });
+        if (craftResult && craftResult.success) {
+          torchItem = bot.inventory.items().find(i => i.name === 'torch');
+        }
+      }
+    }
+
+    if (!torchItem) return;
+
+    // Find a block to place the torch on. First try the ground block below us.
+    const groundPos = pos.offset(0, -1, 0);
+    const groundBlock = bot.blockAt(groundPos);
+    if (groundBlock && groundBlock.name !== 'air' && groundBlock.name !== 'water' && groundBlock.name !== 'lava') {
+      try {
+        const feetBlock = bot.blockAt(pos);
+        if (feetBlock && (feetBlock.name === 'air' || feetBlock.name === 'cave_air')) {
+          await bot.equip(torchItem, 'hand');
+          await bot.placeBlock(groundBlock, new Vec3(0, 1, 0));
+          console.log(`[Mining] Placed torch at ${pos} for visibility`);
+          return;
+        }
+      } catch (err) {
+        console.log(`[Mining] Failed to place torch on ground: ${err.message}`);
+      }
+    }
+
+    // Otherwise, try adjacent walls
+    const directions = [
+      new Vec3(1, 0, 0),
+      new Vec3(-1, 0, 0),
+      new Vec3(0, 0, 1),
+      new Vec3(0, 0, -1),
+    ];
+    for (const dir of directions) {
+      const wallPos = pos.plus(dir);
+      const wallBlock = bot.blockAt(wallPos);
+      if (wallBlock && wallBlock.name !== 'air' && wallBlock.name !== 'water' && wallBlock.name !== 'lava') {
+        try {
+          await bot.equip(torchItem, 'hand');
+          await bot.placeBlock(wallBlock, new Vec3(-dir.x, 0, -dir.z));
+          console.log(`[Mining] Placed torch on wall at ${wallPos} for visibility`);
+          return;
+        } catch {
+          // Try next direction
+        }
+      }
+    }
+  }
+
   // ── mine ────────────────────────────────────────────────────────────────
   async function mine(action) {
     const blockName = action.block;
@@ -170,10 +309,14 @@ function register(bot, goals) {
       return;
     }
 
-    bot.chat(`Mining ${target} ${blockName}...`);
+    // ── Pre-flight: check tool requirements and upgrades ──
+    const currentTool = await ensureMiningTool(bot, blockName);
+    if (miningRules.getBlockRequirement(blockName) && !currentTool) {
+      bot.chat(`❌ Cannot mine ${blockName} for drops. Skipping.`);
+      return;
+    }
 
-    // Equip best tool up-front
-    let currentTool = await equipBestTool(bot, blockName);
+    bot.chat(`Mining ${target} ${blockName}...`);
     let mined = 0;
 
     while (mined < target) {
@@ -183,13 +326,14 @@ function register(bot, goals) {
         break;
       }
 
-      // Re-check tool — it may have broken
-      if (currentTool && (!bot.heldItem || bot.heldItem.name !== currentTool.name)) {
-        console.log('Tool appears to have changed, re-equipping...');
-        currentTool = await equipBestTool(bot, blockName);
-        if (!currentTool) {
-          bot.chat('My tool broke and I have no replacement!');
-        }
+      // Check and place torch if dark underground
+      await placeTorchForLight(bot);
+
+      // Ensure tool is equipped and check for upgrade before digging
+      const activeTool = await ensureMiningTool(bot, blockName);
+      if (miningRules.getBlockRequirement(blockName) && !activeTool) {
+        bot.chat(`❌ Tool broke or insufficient to get drops from ${blockName}. Stopping.`);
+        break;
       }
 
       const dug = await holdDigBlock(bot, goals, block);
@@ -220,6 +364,53 @@ function register(bot, goals) {
     }
   }
 
+  /**
+   * Determine tool type for a block (when not in miningRules).
+   */
+  function getToolTypeForBlock(blockName) {
+    if (blockName.includes('log') || blockName.includes('planks') || blockName.includes('wood')) return 'axe';
+    if (['dirt', 'grass_block', 'sand', 'gravel', 'clay', 'mud'].includes(blockName)) return 'shovel';
+    return 'pickaxe'; // Default
+  }
+
+  /**
+   * Try to auto-craft the best possible tool of a given type.
+   * Attempts from best tier down to the minimum required tier.
+   * @param {string} toolType - 'pickaxe', 'axe', 'shovel', 'sword'
+   * @param {string} minTier - Minimum acceptable tier: 'wooden', 'stone', 'iron', 'diamond'
+   * @returns {boolean} - true if crafted successfully
+   */
+  async function tryAutoCraftTool(toolType, minTier) {
+    const minLevel = miningRules.getTierLevel(minTier);
+
+    // Try from best available to minimum required
+    for (const tier of miningRules.TIER_ORDER) {
+      const level = miningRules.getTierLevel(tier);
+      if (level < minLevel) continue; // Skip tiers below minimum
+      if (tier === 'netherite') continue; // Can't craft netherite tools directly
+
+      const toolName = `${tier}_${toolType}`;
+
+      // Check if we already have one
+      if (bot.inventory.items().find(i => i.name === toolName)) {
+        return true; // Already have it
+      }
+
+      // Try to craft it
+      try {
+        const result = await craftBrain.craft(bot, toolName, 1, { silent: true });
+        if (result && result.success) {
+          console.log(`[Mining] Auto-crafted ${toolName}`);
+          return true;
+        }
+      } catch (err) {
+        console.log(`[Mining] Couldn't craft ${toolName}: ${err.message}`);
+      }
+    }
+
+    return false; // Couldn't craft any suitable tool
+  }
+
   // ── strip_mine ──────────────────────────────────────────────────────────
   async function stripMine(action) {
     const direction = (action.direction || 'north').toLowerCase();
@@ -240,8 +431,12 @@ function register(bot, goals) {
     // Pre-compute ore ID set
     const oreIdSet = new Set(blockIds(bot, ORE_BLOCKS));
 
-    // Equip best pickaxe
-    await equipBestTool(bot, 'stone'); // 'stone' maps to pickaxe in TOOL_FOR_BLOCK
+    // Ensure we have a pickaxe (handles upgrading/crafting)
+    const preTool = await ensureMiningTool(bot, 'stone');
+    if (!preTool) {
+      bot.chat(`❌ Cannot start strip mining: no pickaxe available.`);
+      return;
+    }
 
     const startPos = bot.entity.position.floored();
     const startX = startPos.x;
@@ -269,11 +464,18 @@ function register(bot, goals) {
         // Try to continue anyway
       }
 
+      // Check and place torch if dark underground
+      await placeTorchForLight(bot);
+
       // Dig feet level
       try {
         const feetBlock = bot.blockAt(feetPos);
         if (feetBlock && feetBlock.type !== 0) { // 0 = air
-          await equipBestTool(bot, feetBlock.name);
+          const tool = await ensureMiningTool(bot, feetBlock.name);
+          if (!tool && miningRules.getBlockRequirement(feetBlock.name)) {
+            bot.chat(`❌ Cannot continue strip mining: no suitable tool for ${feetBlock.name}.`);
+            break;
+          }
           await holdDigBlock(bot, goals, feetBlock);
         }
       } catch (err) {
@@ -284,7 +486,11 @@ function register(bot, goals) {
       try {
         const headBlock = bot.blockAt(headPos);
         if (headBlock && headBlock.type !== 0) {
-          await equipBestTool(bot, headBlock.name);
+          const tool = await ensureMiningTool(bot, headBlock.name);
+          if (!tool && miningRules.getBlockRequirement(headBlock.name)) {
+            bot.chat(`❌ Cannot continue strip mining: no suitable tool for ${headBlock.name}.`);
+            break;
+          }
           await holdDigBlock(bot, goals, headBlock);
         }
       } catch (err) {
@@ -299,8 +505,15 @@ function register(bot, goals) {
             const wallBlock = bot.blockAt(wallPos);
             if (wallBlock && oreIdSet.has(wallBlock.type)) {
               const oreName = wallBlock.name;
+
+              // Ensure tool for ore (handles upgrades/breakage/checks)
+              const tool = await ensureMiningTool(bot, oreName);
+              if (!tool) {
+                bot.chat(`⚠️ Skipping ${oreName} — no suitable tool.`);
+                continue;
+              }
+
               bot.chat(`Found ${oreName}!`);
-              await equipBestTool(bot, oreName);
 
               // Navigate closer if needed
               try {
@@ -351,7 +564,7 @@ function register(bot, goals) {
             console.log(`Torch placement error: ${err.message}`);
           }
           // Re-equip pickaxe
-          await equipBestTool(bot, 'stone');
+          await ensureMiningTool(bot, 'stone');
         }
       }
 
@@ -432,8 +645,8 @@ function register(bot, goals) {
       console.log(`Pathfinder error to tree base: ${err.message}`);
     }
 
-    // Equip best axe
-    await equipBestTool(bot, logType);
+    // Equip best axe (and upgrade if possible)
+    await ensureMiningTool(bot, logType);
 
     let chopped = 0;
 
@@ -442,6 +655,8 @@ function register(bot, goals) {
       try {
         const fresh = bot.blockAt(logBlock.position);
         if (fresh && logIdSet.has(fresh.type)) {
+          // Ensure axe is equipped and check for upgrade before digging each log
+          await ensureMiningTool(bot, logType);
           const dug = await holdDigBlock(bot, goals, fresh);
           if (!dug) continue;
           chopped++;

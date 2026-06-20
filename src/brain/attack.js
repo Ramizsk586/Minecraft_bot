@@ -2,7 +2,7 @@
 // Instant, LLM-free combat logic. Scans inventory, scores weapons, equips the
 // strongest option, and drives melee/ranged attacks without AI calls.
 
-const { sleep } = require('../utils');
+const { sleep, findBestTool } = require('../utils');
 
 const ATTACK_TICK_MS = 550;
 const TAUNT_COOLDOWN_MS = 4500;
@@ -15,6 +15,12 @@ const HOSTILE_MOBS = [
   'enderman', 'slime', 'magma_cube', 'blaze', 'witch', 'warden', 'ravager',
   'ghast', 'shulker', 'silverfish', 'endermite', 'hoglin', 'wither_skeleton'
 ];
+
+const PASSABLE_BLOCKS = new Set([
+  'air', 'cave_air', 'void_air', 'water', 'lava',
+  'short_grass', 'tall_grass', 'fern', 'large_fern',
+  'vine', 'glow_lichen', 'snow', 'torch', 'wall_torch',
+]);
 
 function findNearbyHostile(bot, maxDistance = 16) {
   return bot.nearestEntity(entity => {
@@ -213,6 +219,127 @@ function stopMovement(bot) {
   bot.clearControlStates();
 }
 
+function isPassableCombatBlock(block) {
+  if (!block) return true;
+  if (PASSABLE_BLOCKS.has(block.name)) return true;
+  return !!block.boundingBox && block.boundingBox !== 'block';
+}
+
+function sampleLine(bot, from, to, steps = 8) {
+  const points = [];
+  const dx = (to.x - from.x) / steps;
+  const dy = (to.y - from.y) / steps;
+  const dz = (to.z - from.z) / steps;
+
+  for (let i = 1; i < steps; i++) {
+    points.push(from.offset(dx * i, dy * i, dz * i));
+  }
+  return points;
+}
+
+function findCombatObstacle(bot, target) {
+  const botBase = bot.entity.position;
+  const targetBase = target.position;
+  const fromPoints = [
+    botBase.offset(0, 1.6, 0),
+    botBase.offset(0, 1.1, 0),
+  ];
+  const toPoints = [
+    targetBase.offset(0, 1.2, 0),
+    targetBase.offset(0, 0.6, 0),
+  ];
+
+  for (const from of fromPoints) {
+    for (const to of toPoints) {
+      const distance = from.distanceTo(to);
+      const steps = Math.max(6, Math.min(14, Math.ceil(distance * 2)));
+      for (const point of sampleLine(bot, from, to, steps)) {
+        const block = bot.blockAt(point.floored());
+        if (!isPassableCombatBlock(block)) {
+          return block;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function getDigCandidates(bot, target, obstacle) {
+  const candidates = [];
+  if (obstacle) candidates.push(obstacle.position);
+
+  const botPos = bot.entity.position.floored();
+  const targetPos = target.position.floored();
+  const dx = Math.sign(targetPos.x - botPos.x);
+  const dy = Math.sign(targetPos.y - botPos.y);
+  const dz = Math.sign(targetPos.z - botPos.z);
+  const front = botPos.offset(dx, 0, dz);
+
+  if (dy > 0) {
+    candidates.push(front.offset(0, 1, 0));
+    candidates.push(botPos.offset(0, 2, 0));
+  } else if (dy < 0) {
+    candidates.push(front.offset(0, -1, 0));
+    candidates.push(botPos.offset(0, -1, 0));
+  }
+
+  candidates.push(front);
+  candidates.push(front.offset(0, 1, 0));
+  candidates.push(botPos.offset(0, 1, 0));
+
+  const seen = new Set();
+  return candidates.filter(pos => {
+    const key = `${pos.x},${pos.y},${pos.z}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function digTowardTarget(bot, target, state) {
+  const obstacle = findCombatObstacle(bot, target);
+  if (!obstacle && Math.abs(target.position.y - bot.entity.position.y) < 1.2) {
+    return false;
+  }
+
+  const now = Date.now();
+  if (state.lastDigAt && now - state.lastDigAt < 700) {
+    return true;
+  }
+
+  const candidates = getDigCandidates(bot, target, obstacle)
+    .map(pos => bot.blockAt(pos))
+    .filter(block => block && !isPassableCombatBlock(block) && block.name !== 'bedrock' && bot.canDigBlock(block));
+
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  const block = candidates[0];
+  const tool = findBestTool(bot, block.name);
+  state.isDiggingPath = true;
+  state.lastDigAt = now;
+  stopMovement(bot);
+
+  try {
+    if (tool) {
+      await bot.equip(tool, 'hand').catch(() => {});
+    }
+    await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true);
+    await bot.dig(block, true);
+    await sleep(120);
+    return true;
+  } catch (err) {
+    if (!/digging aborted|goal was changed/i.test(err.message || '')) {
+      console.log(`[Combat] Tunnel dig failed on ${block.name}: ${err.message}`);
+    }
+    return false;
+  } finally {
+    state.isDiggingPath = false;
+  }
+}
+
 function approachTarget(bot, target, distance, state) {
   if (distance <= 2.8) {
     bot.setControlState('forward', false);
@@ -308,6 +435,8 @@ async function startAttack(bot, target, options = {}) {
     startedAt: Date.now(),
     lastSeenAt: Date.now(),
     lastTauntAt: 0,
+    lastDigAt: 0,
+    isDiggingPath: false,
     mode: best?.weaponData?.range || 'melee',
     attackTimer: null,
     timeoutTimer: null,
@@ -371,6 +500,18 @@ async function startAttack(bot, target, options = {}) {
     const distance = bot.entity.position.distanceTo(activeTarget.position);
     const weapon = await equipBestWeapon(bot).catch(() => null);
     const weaponData = weapon?.weaponData || null;
+    const obstacle = findCombatObstacle(bot, activeTarget);
+
+    if (state.isDiggingPath) {
+      return;
+    }
+
+    if (obstacle && distance <= 6) {
+      const tunneled = await digTowardTarget(bot, activeTarget, state).catch(() => false);
+      if (tunneled) {
+        return;
+      }
+    }
 
     approachTarget(bot, activeTarget, distance, state);
 
@@ -401,6 +542,10 @@ async function startAttack(bot, target, options = {}) {
       bot.setControlState('sprint', false);
       await fireRanged(bot, activeTarget, weaponData).catch(() => strikeMelee(bot, activeTarget).catch(() => {}));
     } else {
+      if (obstacle && distance <= 4.5) {
+        const tunneled = await digTowardTarget(bot, activeTarget, state).catch(() => false);
+        if (tunneled) return;
+      }
       await strikeMelee(bot, activeTarget).catch(() => {});
     }
 
