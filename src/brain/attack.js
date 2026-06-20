@@ -2,9 +2,32 @@
 // Instant, LLM-free combat logic. Scans inventory, scores weapons, equips the
 // strongest option, and drives melee/ranged attacks without AI calls.
 
+const { sleep } = require('../utils');
+
 const ATTACK_TICK_MS = 550;
 const TAUNT_COOLDOWN_MS = 4500;
 const COMBAT_TIMEOUT_MS = 20000;
+
+const HOSTILE_MOBS = [
+  'zombie', 'skeleton', 'creeper', 'spider', 'cave_spider', 'drowned',
+  'husk', 'phantom', 'pillager', 'vindicator', 'piglin', 'piglin_brute',
+  'enderman', 'slime', 'magma_cube', 'blaze', 'witch', 'warden', 'ravager',
+  'ghast', 'shulker', 'silverfish', 'endermite', 'hoglin', 'wither_skeleton'
+];
+
+function findNearbyHostile(bot, maxDistance = 16) {
+  return bot.nearestEntity(entity => {
+    if (!entity || !entity.isValid || entity.id === bot.entity.id) return false;
+    if (entity.type === 'object') return false;
+    if (entity.name === 'item' || entity.name === 'xp_orb') return false;
+    
+    const name = entity.name || '';
+    if (HOSTILE_MOBS.includes(name)) {
+      return entity.position.distanceTo(bot.entity.position) <= maxDistance;
+    }
+    return false;
+  });
+}
 
 const WEAPON_DB = {
   netherite_sword: { damage: 8, speed: 1.6, range: 'melee', priority: 10 },
@@ -170,13 +193,30 @@ function stopMovement(bot) {
   bot.clearControlStates();
 }
 
-function approachTarget(bot, target, distance) {
+function approachTarget(bot, target, distance, state) {
   if (distance <= 2.8) {
     bot.setControlState('forward', false);
     bot.setControlState('sprint', false);
-    bot.setControlState('jump', false);
+    
+    // Circle/strafe the target when in close range (dodge attacks)
+    if (state) {
+      if (!state.lastStrafeSwitch || Date.now() - state.lastStrafeSwitch > 1200) {
+        state.strafeDir = state.strafeDir === 'left' ? 'right' : 'left';
+        state.lastStrafeSwitch = Date.now();
+      }
+      bot.setControlState(state.strafeDir, true);
+      bot.setControlState(state.strafeDir === 'left' ? 'right' : 'left', false);
+    }
+    
+    // Jump occasionally when close to hit critical hits
+    const verticalGap = target.position.y - bot.entity.position.y;
+    bot.setControlState('jump', verticalGap > 0.6 || (distance < 2.0 && bot.entity.onGround && Math.random() < 0.35));
     return;
   }
+
+  // Clear strafe controls when approaching
+  bot.setControlState('left', false);
+  bot.setControlState('right', false);
 
   bot.setControlState('forward', true);
   bot.setControlState('sprint', distance > 4);
@@ -224,6 +264,15 @@ async function startAttack(bot, target, options = {}) {
   stopAttack(bot, { silent: true });
 
   const best = await equipBestWeapon(bot).catch(() => null);
+
+  // Auto-equip shield to off-hand if we have one
+  const shield = bot.inventory.items().find(i => i.name === 'shield');
+  if (shield) {
+    try {
+      await bot.equip(shield, 'off-hand');
+    } catch {}
+  }
+
   const enemyName = describeEntity(target);
   const combatState = {
     target,
@@ -234,49 +283,96 @@ async function startAttack(bot, target, options = {}) {
     mode: best?.weaponData?.range || 'melee',
     attackTimer: null,
     timeoutTimer: null,
+    strafeDir: 'left',
+    lastStrafeSwitch: 0,
   };
 
   bot._combatState = combatState;
   bot.chat(pickFightLine('opening', enemyName));
 
+  let currentTarget = target;
+
   async function tick() {
     const state = bot._combatState;
-    if (!state || state.target.id !== target.id) return;
+    if (!state || state.target.id !== currentTarget.id) return;
 
-    if (!target.isValid) {
-      stopAttack(bot, { reason: 'finish' });
+    // Check target validity (slime splitting support)
+    if (!state.target || !state.target.isValid) {
+      const nextTarget = findNearbyHostile(bot, 16);
+      if (nextTarget) {
+        console.log(`[Combat] Target invalid/died. Switching to next nearby threat: ${nextTarget.name}`);
+        state.target = nextTarget;
+        state.enemyName = describeEntity(nextTarget);
+        state.lastSeenAt = Date.now();
+        currentTarget = nextTarget;
+      } else {
+        stopAttack(bot, { reason: 'finish' });
+        return;
+      }
+    }
+
+    const activeTarget = state.target;
+
+    // Low-health retreat logic
+    if (bot.health <= 7) {
+      bot.chat("⚠️ Low health! Retreating to recover!");
+      const enemyPos = activeTarget.position.clone();
+      stopAttack(bot, { reason: 'retreat' });
+
+      // Calculate opposite direction vector to sprint away
+      const diff = bot.entity.position.subtract(enemyPos);
+      diff.y = 0;
+      const retreatDir = diff.normalize().scale(10);
+      const retreatPos = bot.entity.position.plus(retreatDir);
+
+      try {
+        const { GoalNear } = require('mineflayer-pathfinder').goals;
+        await bot.pathfinder.goto(new GoalNear(retreatPos.x, retreatPos.y, retreatPos.z, 2));
+        // Force eat to regenerate health
+        const eatBrain = require('./eat');
+        await eatBrain.eat(bot, { silent: false, force: true });
+      } catch (err) {
+        console.log('[Combat] Retreat pathfind failed:', err.message);
+      }
       return;
     }
 
     state.lastSeenAt = Date.now();
 
-    const distance = bot.entity.position.distanceTo(target.position);
+    const distance = bot.entity.position.distanceTo(activeTarget.position);
     const weapon = await equipBestWeapon(bot).catch(() => null);
     const weaponData = weapon?.weaponData || null;
 
-    approachTarget(bot, target, distance);
+    approachTarget(bot, activeTarget, distance, state);
+
+    // Active shield usage against skeletons
+    if (activeTarget.name === 'skeleton' && distance > 5 && distance < 15 && shield) {
+      bot.activateItem('off-hand');
+      await sleep(350);
+      bot.deactivateItem('off-hand');
+    }
 
     if (!weaponData) {
       if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
         bot.chat(`Fists only, ${state.enemyName}. You still lose.`);
         state.lastTauntAt = Date.now();
       }
-      await strikeMelee(bot, target).catch(() => {});
+      await strikeMelee(bot, activeTarget).catch(() => {});
       return;
     }
 
     state.mode = weaponData.range;
 
     try {
-      await bot.lookAt(target.position.offset(0, 1.0, 0), true);
+      await bot.lookAt(activeTarget.position.offset(0, 1.0, 0), true);
     } catch {}
 
     if (canUseRanged(bot, weaponData, distance)) {
       bot.setControlState('forward', false);
       bot.setControlState('sprint', false);
-      await fireRanged(bot, target, weaponData).catch(() => strikeMelee(bot, target).catch(() => {}));
+      await fireRanged(bot, activeTarget, weaponData).catch(() => strikeMelee(bot, activeTarget).catch(() => {}));
     } else {
-      await strikeMelee(bot, target).catch(() => {});
+      await strikeMelee(bot, activeTarget).catch(() => {});
     }
 
     if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
@@ -359,4 +455,5 @@ module.exports = {
   combatReport,
   isAttackableEntity,
   describeEntity,
+  findNearbyHostile,
 };

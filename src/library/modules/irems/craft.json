@@ -1,0 +1,1147 @@
+{
+  "oak_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "oak_log", "count": 1 }
+    ]
+  },
+  "spruce_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "spruce_log", "count": 1 }
+    ]
+  },
+  "birch_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "birch_log", "count": 1 }
+    ]
+  },
+  "jungle_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "jungle_log", "count": 1 }
+    ]
+  },
+  "acacia_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "acacia_log", "count": 1 }
+    ]
+  },
+  "dark_oak_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "dark_oak_log", "count": 1 }
+    ]
+  },
+  "mangrove_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "mangrove_log", "count": 1 }
+    ]
+  },
+  "cherry_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "cherry_log", "count": 1 }
+    ]
+  },
+  "crimson_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "crimson_stem", "count": 1 }
+    ]
+  },
+  "warped_planks": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "warped_stem", "count": 1 }
+    ]
+  },
+  "stick": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "oak_planks", "count": 2 }
+    ]
+  },
+  "crafting_table": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "oak_planks", "count": 4 }
+    ]
+  },
+  "chest": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 8 }
+    ]
+  },
+  "furnace": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 8 }
+    ]
+  },
+  "torch": {
+    "count": 4,
+    "table": false,
+    "ingredients": [
+      { "item": "coal", "count": 1 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "campfire": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 3 },
+      { "item": "coal", "count": 1 },
+      { "item": "oak_log", "count": 3 }
+    ]
+  },
+  "bread": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "wheat", "count": 3 }
+    ]
+  },
+  "white_bed": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "white_wool", "count": 3 },
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "red_bed": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "red_wool", "count": 3 },
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "blue_bed": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "blue_wool", "count": 3 },
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "black_bed": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "black_wool", "count": 3 },
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "yellow_bed": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "yellow_wool", "count": 3 },
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "green_bed": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "green_wool", "count": 3 },
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "oak_fence": {
+    "count": 3,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 2 },
+      { "item": "oak_planks", "count": 4 }
+    ]
+  },
+  "oak_fence_gate": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 4 },
+      { "item": "oak_planks", "count": 2 }
+    ]
+  },
+  "wooden_pickaxe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "wooden_axe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "wooden_shovel": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 1 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "wooden_hoe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 2 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "wooden_sword": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 2 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "stone_pickaxe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "stone_axe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "stone_shovel": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 1 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "stone_hoe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 2 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "stone_sword": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 2 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "iron_pickaxe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "iron_axe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "iron_shovel": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 1 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "iron_hoe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 2 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "iron_sword": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 2 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "golden_pickaxe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "golden_axe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "golden_shovel": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 1 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "golden_hoe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 2 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "golden_sword": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 2 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "diamond_pickaxe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "diamond_axe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 3 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "diamond_shovel": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 1 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "diamond_hoe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 2 },
+      { "item": "stick", "count": 2 }
+    ]
+  },
+  "diamond_sword": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 2 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "netherite_pickaxe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_pickaxe", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_axe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_axe", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_shovel": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_shovel", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_hoe": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_hoe", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_sword": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_sword", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "bucket": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 3 }
+    ]
+  },
+  "shield": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 6 },
+      { "item": "iron_ingot", "count": 1 }
+    ]
+  },
+  "glass_pane": {
+    "count": 16,
+    "table": true,
+    "ingredients": [
+      { "item": "glass", "count": 6 }
+    ]
+  },
+  "leather_helmet": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "leather", "count": 5 }
+    ]
+  },
+  "leather_chestplate": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "leather", "count": 8 }
+    ]
+  },
+  "leather_leggings": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "leather", "count": 7 }
+    ]
+  },
+  "leather_boots": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "leather", "count": 4 }
+    ]
+  },
+  "iron_helmet": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 5 }
+    ]
+  },
+  "iron_chestplate": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 8 }
+    ]
+  },
+  "iron_leggings": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 7 }
+    ]
+  },
+  "iron_boots": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 4 }
+    ]
+  },
+  "golden_helmet": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 5 }
+    ]
+  },
+  "golden_chestplate": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 8 }
+    ]
+  },
+  "golden_leggings": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 7 }
+    ]
+  },
+  "golden_boots": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 4 }
+    ]
+  },
+  "diamond_helmet": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 5 }
+    ]
+  },
+  "diamond_chestplate": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 8 }
+    ]
+  },
+  "diamond_leggings": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 7 }
+    ]
+  },
+  "diamond_boots": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 4 }
+    ]
+  },
+  "netherite_helmet": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_helmet", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_chestplate": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_chestplate", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_leggings": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_leggings", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "netherite_boots": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond_boots", "count": 1 },
+      { "item": "netherite_ingot", "count": 1 }
+    ]
+  },
+  "sugar": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "sugar_cane", "count": 1 }
+    ]
+  },
+  "paper": {
+    "count": 3,
+    "table": true,
+    "ingredients": [
+      { "item": "sugar_cane", "count": 3 }
+    ]
+  },
+  "book": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "paper", "count": 3 },
+      { "item": "leather", "count": 1 }
+    ]
+  },
+  "bookshelf": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 6 },
+      { "item": "book", "count": 3 }
+    ]
+  },
+  "hay_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "wheat", "count": 9 }
+    ]
+  },
+  "wheat": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "hay_block", "count": 1 }
+    ]
+  },
+  "iron_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 9 }
+    ]
+  },
+  "gold_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 9 }
+    ]
+  },
+  "diamond_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "diamond", "count": 9 }
+    ]
+  },
+  "emerald_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "emerald", "count": 9 }
+    ]
+  },
+  "coal_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "coal", "count": 9 }
+    ]
+  },
+  "redstone_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "redstone", "count": 9 }
+    ]
+  },
+  "lapis_block": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "lapis_lazuli", "count": 9 }
+    ]
+  },
+  "iron_ingot": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "iron_block", "count": 1 }
+    ]
+  },
+  "gold_ingot": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "gold_block", "count": 1 }
+    ]
+  },
+  "diamond": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "diamond_block", "count": 1 }
+    ]
+  },
+  "emerald": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "emerald_block", "count": 1 }
+    ]
+  },
+  "coal": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "coal_block", "count": 1 }
+    ]
+  },
+  "redstone": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "redstone_block", "count": 1 }
+    ]
+  },
+  "lapis_lazuli": {
+    "count": 9,
+    "table": false,
+    "ingredients": [
+      { "item": "lapis_block", "count": 1 }
+    ]
+  },
+  "mushroom_stew": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "red_mushroom", "count": 1 },
+      { "item": "brown_mushroom", "count": 1 },
+      { "item": "bowl", "count": 1 }
+    ]
+  },
+  "bowl": {
+    "count": 4,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 3 }
+    ]
+  },
+  "cake": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "milk_bucket", "count": 3 },
+      { "item": "sugar", "count": 2 },
+      { "item": "egg", "count": 1 },
+      { "item": "wheat", "count": 3 }
+    ]
+  },
+  "cookie": {
+    "count": 8,
+    "table": true,
+    "ingredients": [
+      { "item": "wheat", "count": 2 },
+      { "item": "cocoa_beans", "count": 1 }
+    ]
+  },
+  "pumpkin_pie": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "pumpkin", "count": 1 },
+      { "item": "sugar", "count": 1 },
+      { "item": "egg", "count": 1 }
+    ]
+  },
+  "golden_apple": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 8 },
+      { "item": "apple", "count": 1 }
+    ]
+  },
+  "golden_carrot": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_nugget", "count": 8 },
+      { "item": "carrot", "count": 1 }
+    ]
+  },
+  "bow": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 3 },
+      { "item": "string", "count": 3 }
+    ]
+  },
+  "crossbow": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 3 },
+      { "item": "string", "count": 2 },
+      { "item": "iron_ingot", "count": 1 },
+      { "item": "tripwire_hook", "count": 1 }
+    ]
+  },
+  "arrow": {
+    "count": 4,
+    "table": true,
+    "ingredients": [
+      { "item": "flint", "count": 1 },
+      { "item": "stick", "count": 1 },
+      { "item": "feather", "count": 1 }
+    ]
+  },
+  "shears": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 2 }
+    ]
+  },
+  "flint_and_steel": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 1 },
+      { "item": "flint", "count": 1 }
+    ]
+  },
+  "fishing_rod": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 3 },
+      { "item": "string", "count": 2 }
+    ]
+  },
+  "lead": {
+    "count": 2,
+    "table": true,
+    "ingredients": [
+      { "item": "string", "count": 4 },
+      { "item": "slimeball", "count": 1 }
+    ]
+  },
+  "spyglass": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "copper_ingot", "count": 2 },
+      { "item": "amethyst_shard", "count": 1 }
+    ]
+  },
+  "compass": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 4 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "clock": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 4 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "minecart": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 5 }
+    ]
+  },
+  "chest_minecart": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "minecart", "count": 1 },
+      { "item": "chest", "count": 1 }
+    ]
+  },
+  "oak_boat": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 5 }
+    ]
+  },
+  "rail": {
+    "count": 16,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 6 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "powered_rail": {
+    "count": 6,
+    "table": true,
+    "ingredients": [
+      { "item": "gold_ingot", "count": 6 },
+      { "item": "stick", "count": 1 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "redstone_torch": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "redstone", "count": 1 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "repeater": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stone", "count": 3 },
+      { "item": "redstone_torch", "count": 2 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "comparator": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "redstone_torch", "count": 3 },
+      { "item": "nether_quartz", "count": 1 },
+      { "item": "stone", "count": 3 }
+    ]
+  },
+  "piston": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 3 },
+      { "item": "cobblestone", "count": 4 },
+      { "item": "iron_ingot", "count": 1 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "sticky_piston": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "piston", "count": 1 },
+      { "item": "slimeball", "count": 1 }
+    ]
+  },
+  "dispenser": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 7 },
+      { "item": "bow", "count": 1 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "dropper": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 7 },
+      { "item": "redstone", "count": 1 }
+    ]
+  },
+  "hopper": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 5 },
+      { "item": "chest", "count": 1 }
+    ]
+  },
+  "observer": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 6 },
+      { "item": "redstone", "count": 2 },
+      { "item": "nether_quartz", "count": 1 }
+    ]
+  },
+  "lever": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "cobblestone", "count": 1 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "stone_button": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "stone", "count": 1 }
+    ]
+  },
+  "oak_button": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "oak_planks", "count": 1 }
+    ]
+  },
+  "oak_pressure_plate": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "oak_planks", "count": 2 }
+    ]
+  },
+  "stone_pressure_plate": {
+    "count": 1,
+    "table": false,
+    "ingredients": [
+      { "item": "stone", "count": 2 }
+    ]
+  },
+  "anvil": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_block", "count": 3 },
+      { "item": "iron_ingot", "count": 4 }
+    ]
+  },
+  "brewing_stand": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "cobblestone", "count": 3 },
+      { "item": "blaze_rod", "count": 1 }
+    ]
+  },
+  "cauldron": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 7 }
+    ]
+  },
+  "enchanting_table": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "obsidian", "count": 4 },
+      { "item": "diamond", "count": 2 },
+      { "item": "book", "count": 1 }
+    ]
+  },
+  "ender_chest": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "obsidian", "count": 8 },
+      { "item": "eye_of_ender", "count": 1 }
+    ]
+  },
+  "beacon": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "glass", "count": 5 },
+      { "item": "nether_star", "count": 1 },
+      { "item": "obsidian", "count": 3 }
+    ]
+  },
+  "item_frame": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 8 },
+      { "item": "leather", "count": 1 }
+    ]
+  },
+  "ladder": {
+    "count": 3,
+    "table": true,
+    "ingredients": [
+      { "item": "stick", "count": 7 }
+    ]
+  },
+  "sign": {
+    "count": 3,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 6 },
+      { "item": "stick", "count": 1 }
+    ]
+  },
+  "oak_door": {
+    "count": 3,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 6 }
+    ]
+  },
+  "iron_door": {
+    "count": 3,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 6 }
+    ]
+  },
+  "oak_trapdoor": {
+    "count": 2,
+    "table": true,
+    "ingredients": [
+      { "item": "oak_planks", "count": 6 }
+    ]
+  },
+  "iron_trapdoor": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "iron_ingot", "count": 4 }
+    ]
+  },
+  "blast_furnace": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "furnace", "count": 1 },
+      { "item": "iron_ingot", "count": 5 },
+      { "item": "smooth_stone", "count": 3 }
+    ]
+  },
+  "smoker": {
+    "count": 1,
+    "table": true,
+    "ingredients": [
+      { "item": "furnace", "count": 1 },
+      { "item": "oak_log", "count": 4 }
+    ]
+  }
+}

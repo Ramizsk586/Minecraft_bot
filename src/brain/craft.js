@@ -89,6 +89,20 @@ const RECIPES = {
   // ── Misc ──
   bucket:     { category: 'tool',    cost: { iron_ingot: 3 }, output: 1, needsTable: true, description: '3 Iron → Bucket' },
   bowl:       { category: 'basic',   cost: { _planks: 3 },    output: 4, needsTable: true, description: '3 Planks → 4 Bowls' },
+  
+  // ── Newly Added Recipes ──
+  white_wool: { category: 'basic',   cost: { string: 4 },    output: 1, needsTable: true, description: '4 String → White Wool' },
+  bed:        { category: 'basic',   cost: { _planks: 3, white_wool: 3 }, output: 1, needsTable: true, description: '3 Planks + 3 Wool → Bed' },
+  shears:     { category: 'tool',    cost: { iron_ingot: 2 }, output: 1, needsTable: true, description: '2 Iron Ingot → Shears' },
+  bow:        { category: 'weapon',  cost: { stick: 3, string: 3 }, output: 1, needsTable: true, description: '3 Sticks + 3 Strings → Bow' },
+  arrow:      { category: 'basic',   cost: { flint: 1, stick: 1, feather: 1 }, output: 4, needsTable: true, description: 'Flint + Stick + Feather → 4 Arrows' },
+  oak_door:   { category: 'basic',   cost: { _planks: 6 },    output: 3, needsTable: true, description: '6 Planks → 3 Doors' },
+  ladder:     { category: 'basic',   cost: { stick: 7 },      output: 3, needsTable: true, description: '7 Sticks → 3 Ladders' },
+  hay_block:  { category: 'basic',   cost: { wheat: 9 },      output: 1, needsTable: true, description: '9 Wheat → Hay Block' },
+  iron_block: { category: 'basic',   cost: { iron_ingot: 9 }, output: 1, needsTable: true, description: '9 Iron Ingot → Iron Block' },
+  gold_block: { category: 'basic',   cost: { gold_ingot: 9 }, output: 1, needsTable: true, description: '9 Gold Ingot → Gold Block' },
+  diamond_block:{ category: 'basic',  cost: { diamond: 9 },   output: 1, needsTable: true, description: '9 Diamond → Diamond Block' },
+  sandstone:  { category: 'basic',   cost: { sand: 4 },       output: 1, needsTable: false, description: '4 Sand → Sandstone' },
 };
 
 // Tiered item types that get prefixed with a material tier

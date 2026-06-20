@@ -6,6 +6,12 @@ const { normalizeMinecraftVersion, extractJson, sleep } = require('./utils');
 const { getWorldState } = require('./worldState');
 const { createExecutor } = require('./actions/index');
 const brain = require('./brain/index');
+const libraryFunctions = require('./library/functions');
+const librarySkills = require('./library/skills');
+const libraryWorld = require('./library/world');
+const libraryData = require('./library/data');
+const libraryCalc = require('./library/modules/calc');
+const { resolveItemName } = require('./library/modules/itemNameResolver');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +59,16 @@ function createBot() {
     // Initialize the action executor with all modules
     executeAction = createExecutor(bot);
     bot.executeAction = executeAction;
+    bot.library = {
+      functions: libraryFunctions,
+      skills: librarySkills,
+      world: libraryWorld,
+      data: libraryData,
+      calc: libraryCalc,
+      resolveItemName,
+      availableSkills: libraryFunctions.availableSkills,
+      executeSkill: (...args) => libraryFunctions.executeSkill(bot, ...args),
+    };
 
     // Initialize the brain (auto-eat, instant command handling, autonomous survival)
     brain.init(bot, { owner: config.owner });
@@ -70,7 +86,13 @@ function createBot() {
     // Any message from the owner resets the idle timer
     bot.lastInteractionTime = Date.now();
 
-    if (!message.startsWith('!')) return;
+    if (!message.startsWith('!')) {
+      const handled = await brain.chat.tryHandleChat(bot, username, message);
+      if (handled) {
+        console.log(`💬 Chat brain handled: "${message}"`);
+      }
+      return;
+    }
 
     const command = message.slice(1).trim();
     await handleCommand(username, command);
@@ -121,9 +143,8 @@ Available actions:
 - {"action": "place", "block": "block_name", "x": number, "y": number, "z": number}
 - {"action": "build", "block": "block_name", "x": number, "y": number, "z": number, "width": number, "height": number, "depth": number, "type": "walls|floor|solid|shell"}
 - {"action": "fill", "block": "block_name", "x1": number, "y1": number, "z1": number, "x2": number, "y2": number, "z2": number}
-- {"action": "house", "style": "basic|cottage|bunker", "x": number, "y": number, "z": number}
-- {"action": "wall", "block": "block_name", "x1": number, "y": number, "z1": number, "x2": number, "y2": number, "z2": number, "height": number}
-- {"action": "clear", "x1": number, "y1": number, "z1": number, "x2": number, "y2": number, "z2": number}
+- {"action": "house_plan", "blueprint": "starter_cottage|crop_farm_plot|animal_pen|cooking_shack"}
+- {"action": "build_house", "blueprint": "starter_cottage|crop_farm_plot|animal_pen|cooking_shack", "x": number, "y": number, "z": number, "facing": "north|south|east|west"}
 
 === MINING & WOOD ===
 - {"action": "mine", "block": "block_name", "count": number}
@@ -153,13 +174,13 @@ GUIDELINES:
 - For multi-step tasks, use "sequence" to chain actions.
 - Always pick the most logical action given the world state and inventory.
 - If the player asks to build something, calculate approximate coordinates relative to the bot's position.
-- If the player asks for a house, use "house" action with a style. Use coordinates near the bot.
+- If the player asks for a house or survival structure, prefer "build_house". The builder can gather missing core materials like logs, cobblestone, sand, and coal before construction.
 - For mining, prefer the correct tool. The bot auto-equips the best tool.
 - The bot auto-eats when hungry, auto-crafts weapons before combat, and auto-equips armor.
 - If the task is impossible or you need clarification, use "chat" to explain why.
-- When building structures, use "build" with type "walls" for custom sizes, or "house" for preset buildings.
+- When building structures, use "build" with type "walls" for custom sizes, or "build_house" for built-in structures like cottage, farm plot, animal pen, and cooking shack.
 - For farming, use "create_farm" to set up new farms, "harvest" with replant for ongoing harvesting.
-- For clearing land, use "clear" to remove all blocks in an area before building.`;
+- Use "house_plan" when you want to report the blueprint and materials before building.`;
 
 async function askAI(username, userMessage) {
   if (!config.llmApiKey) {

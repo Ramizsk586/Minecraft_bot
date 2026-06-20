@@ -3,6 +3,7 @@
 // combat brain immediately without any LLM usage.
 
 const attackBrain = require('./attack');
+const libraryData = require('../library/data');
 
 let _defanceState = null;
 
@@ -12,26 +13,9 @@ function isLikelyThreat(bot, entity, options = {}) {
   if (entity.type === 'player') return true;
 
   const name = entity.name || '';
-  return [
-    'zombie',
-    'skeleton',
-    'creeper',
-    'spider',
-    'cave_spider',
-    'drowned',
-    'husk',
-    'phantom',
-    'pillager',
-    'vindicator',
-    'piglin',
-    'piglin_brute',
-    'enderman',
-    'slime',
-    'magma_cube',
-    'blaze',
-    'witch',
-    'warden',
-  ].includes(name);
+  const info = libraryData.getMobInfo(name);
+  if (!info) return false;
+  return info.type === 'hostile' || (info.type === 'neutral' && info.threat >= 4);
 }
 
 function findNearestThreat(bot, options = {}) {
@@ -116,6 +100,16 @@ function onEntityGone(bot, entity) {
   if (!_defanceState?.enabled) return;
   if (!entity || !bot._combatState?.target) return;
   if (bot._combatState.target.id !== entity.id) return;
+
+  // Check if there are other nearby threats before finishing (e.g. slimes split)
+  const nextTarget = attackBrain.findNearbyHostile ? attackBrain.findNearbyHostile(bot, 16) : null;
+  if (nextTarget) {
+    console.log(`[Defance] Target entity ${entity.name} is gone. Switching to next threat: ${nextTarget.name}`);
+    bot._combatState.target = nextTarget;
+    bot._combatState.enemyName = attackBrain.describeEntity(nextTarget);
+    bot._combatState.lastSeenAt = Date.now();
+    return;
+  }
 
   attackBrain.stopAttack(bot, { reason: 'finish' });
 }

@@ -14,6 +14,11 @@ const eatBrain = require('./eat');
 const craftBrain = require('./craft');
 const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
+const mineBrain = require('./mine');
+
+// Library dependencies
+const world = require('../library/world');
+const skills = require('../library/skills');
 
 let _surviveBot = null;
 let _surviveOptions = {};
@@ -49,12 +54,16 @@ function getBestToolInInventory(bot, type) {
   return tools[0];
 }
 
-async function runAutonomyAction(bot, name, actionObj) {
+async function runAutonomyAction(bot, name, actionOrFn) {
   _surviveBusy = true;
   bot._currentTask = `autonomy:${name}`;
   console.log(`[Autonomy] Starting action: ${name}`);
   try {
-    await bot.executeAction(actionObj);
+    if (typeof actionOrFn === 'function') {
+      await actionOrFn();
+    } else {
+      await bot.executeAction(actionOrFn);
+    }
   } catch (err) {
     console.error(`[Autonomy] Action ${name} failed:`, err);
   } finally {
@@ -69,10 +78,7 @@ async function runAutonomyAction(bot, name, actionObj) {
  * Scan for a safe solid block to place things on
  */
 function findPlacementBlock(bot) {
-  return bot.findBlock({
-    matching: block => ['grass_block', 'dirt', 'stone', 'cobblestone', 'sand', 'oak_planks', 'spruce_planks', 'birch_planks'].includes(block.name),
-    maxDistance: 4
-  });
+  return world.getNearestBlock(bot, block => ['grass_block', 'dirt', 'stone', 'cobblestone', 'sand', 'oak_planks', 'spruce_planks', 'birch_planks'].includes(block.name), 4);
 }
 
 /**
@@ -107,7 +113,7 @@ async function surviveTick(bot) {
   try {
     // ══════════════════════ PRIORITY 1: HEAL / HUNGER ══════════════════════
     if (bot.food < 13 || bot.health < 10) {
-      const result = await eatBrain.eat(bot, { silent: false, force: false });
+      const result = await skills.eatFood(bot);
       if (result.ate) {
         await sleep(1000);
         return;
@@ -115,14 +121,17 @@ async function surviveTick(bot) {
     }
 
     // ══════════════════════ PRIORITY 2: THREAT ENGAGEMENT ══════════════════════
-    const threat = defanceBrain.findNearestThreat(bot, _surviveOptions);
-    if (threat) {
-      console.log(`[Autonomy] Threat detected near: ${threat.name}. Initiating defense.`);
-      // Auto-equip weapon before attack
-      try {
-        await craftBrain.ensureWeapon(bot);
-      } catch {}
-      await attackBrain.startAttack(bot, threat, _surviveOptions);
+    const threatReport = mineBrain.scanThreatLevel(bot, _surviveOptions);
+    if (threatReport.level !== 'none' && threatReport.primaryThreat) {
+      console.log(`[Autonomy] Threat detected (${threatReport.level}). Initiating defense.`);
+      if (threatReport.level === 'high') {
+        await mineBrain.runMineDecision(bot, _surviveOptions);
+      } else {
+        try {
+          await craftBrain.ensureWeapon(bot);
+        } catch {}
+        await attackBrain.startAttack(bot, threatReport.primaryThreat, _surviveOptions);
+      }
       return;
     }
 
@@ -134,10 +143,7 @@ async function surviveTick(bot) {
       if (bot.isSleeping) return;
 
       // A. Try to find a nearby bed block to sleep
-      const bedBlock = bot.findBlock({
-        matching: block => block.name.endsWith('_bed'),
-        maxDistance: 24
-      });
+      const bedBlock = world.getNearestBlock(bot, block => block.name.endsWith('_bed'), 24);
 
       if (bedBlock) {
         const dist = bot.entity.position.distanceTo(bedBlock.position);
@@ -267,7 +273,7 @@ async function surviveTick(bot) {
       // E. Out of options, mine dirt to survive
       if (dirtCount < 15) {
         bot.chat("Mining some dirt for night shelter...");
-        await runAutonomyAction(bot, 'gathering_dirt', { action: 'mine', block: 'dirt', count: 15 });
+        await runAutonomyAction(bot, 'gathering_dirt', () => skills.mineBlock(bot, 'dirt', 15));
         return;
       }
     }
@@ -299,10 +305,7 @@ async function surviveTick(bot) {
       }
 
       // B. Collect placed bed
-      const nearbyBed = bot.findBlock({
-        matching: block => block.name.endsWith('_bed'),
-        maxDistance: 8
-      });
+      const nearbyBed = world.getNearestBlock(bot, block => block.name.endsWith('_bed'), 8);
       if (nearbyBed) {
         bot.chat("Picking up my bed...");
         _surviveBusy = true;
@@ -379,54 +382,54 @@ async function surviveTick(bot) {
       // Step 1: Wood Gathering (if no tools or wood supplies low)
       if (!pickaxe && logs < 4 && planks < 4) {
         bot.chat("No pickaxe or wood. Gathering logs...");
-        await runAutonomyAction(bot, 'gathering_logs', { action: 'chop_tree' });
+        const result = await mineBrain.cutTreeSafely(bot, _surviveOptions);
+        if (result.success) {
+          await mineBrain.ensureProgression(bot);
+        }
         return;
       }
 
       // Step 2: Planks & Sticks conversions
       if (logs > 0 && planks < 4) {
         bot.chat("Converting logs to planks...");
-        await craftBrain.craft(bot, 'planks', logs, { silent: true });
+        await mineBrain.ensureProgression(bot);
         return;
       }
       if (planks >= 2 && sticks < 4) {
         bot.chat("Making sticks...");
-        await craftBrain.craft(bot, 'stick', 1, { silent: true });
+        await mineBrain.ensureProgression(bot);
         return;
       }
 
       // Step 3: Craft Crafting Table
-      const tableBlockNear = bot.findBlock({
-        matching: bot.registry.blocksByName['crafting_table'].id,
-        maxDistance: 16
-      });
+      const tableBlockNear = world.getNearestBlock(bot, 'crafting_table', 16);
       if (!table && !tableBlockNear && planks >= 4) {
         bot.chat("Crafting table needed. Making one...");
-        await craftBrain.craft(bot, 'crafting_table', 1, { silent: true });
+        await mineBrain.ensureProgression(bot);
         return;
       }
 
       // Step 4: Craft Wooden Pickaxe
       if (!pickaxe && planks >= 3 && sticks >= 2) {
         bot.chat("Crafting a wooden pickaxe...");
-        await craftBrain.craft(bot, 'wooden_pickaxe', 1, { silent: true });
+        await mineBrain.ensureProgression(bot);
         return;
       }
 
       // Step 5: Mine Cobblestone
       if (pickaxe && pickaxe.name === 'wooden_pickaxe' && cobble < 12) {
         bot.chat("Mining cobblestone to upgrade tools...");
-        await runAutonomyAction(bot, 'mining_cobble', { action: 'mine', block: 'stone', count: 8 });
+        await runAutonomyAction(bot, 'mining_cobble', () => skills.mineBlock(bot, 'stone', 8));
         return;
       }
 
       // Step 6: Craft Stone Tools & Furnace
       if (pickaxe && pickaxe.name === 'wooden_pickaxe' && cobble >= 11) {
         bot.chat("Upgrading to stone gear!");
-        await craftBrain.craft(bot, 'stone_pickaxe', 1, { silent: true });
-        await craftBrain.craft(bot, 'stone_sword', 1, { silent: true });
-        await craftBrain.craft(bot, 'stone_axe', 1, { silent: true });
-        await craftBrain.craft(bot, 'furnace', 1, { silent: true });
+        await skills.craftItem(bot, 'stone_pickaxe', 1);
+        await skills.craftItem(bot, 'stone_sword', 1);
+        await skills.craftItem(bot, 'stone_axe', 1);
+        await skills.craftItem(bot, 'furnace', 1);
         return;
       }
 
@@ -436,10 +439,10 @@ async function surviveTick(bot) {
         const coalCount = craftBrain.countItem(bot, 'coal');
         if (coalCount < 3) {
           bot.chat("Searching for coal...");
-          await runAutonomyAction(bot, 'mining_coal', { action: 'mine', block: 'coal_ore', count: 4 });
+          await runAutonomyAction(bot, 'mining_coal', () => skills.mineBlock(bot, 'coal_ore', 4));
         } else {
           bot.chat("Searching for iron ore...");
-          await runAutonomyAction(bot, 'mining_iron', { action: 'mine', block: 'iron_ore', count: 4 });
+          await runAutonomyAction(bot, 'mining_iron', () => skills.mineBlock(bot, 'iron_ore', 4));
         }
         return;
       }
@@ -492,29 +495,29 @@ async function surviveTick(bot) {
       // Step 9: Craft Iron Pickaxe & Weapon
       if (ironIngots >= 3 && (!pickaxe || pickaxe.name !== 'iron_pickaxe')) {
         bot.chat("Upgrading to iron pickaxe!");
-        await craftBrain.craft(bot, 'iron_pickaxe', 1, { silent: true });
+        await skills.craftItem(bot, 'iron_pickaxe', 1);
         return;
       }
       if (ironIngots >= 2 && (!sword || sword.name !== 'iron_sword')) {
         bot.chat("Upgrading to iron sword!");
-        await craftBrain.craft(bot, 'iron_sword', 1, { silent: true });
+        await skills.craftItem(bot, 'iron_sword', 1);
         return;
       }
 
       // E. Gathering general resources when stocks are low
       if (logs < 10) {
         bot.chat("Gathering some more wood...");
-        await runAutonomyAction(bot, 'gathering_logs_day', { action: 'chop_tree' });
+        const result = await mineBrain.cutTreeSafely(bot, _surviveOptions);
+        if (result.success) {
+          await mineBrain.ensureProgression(bot);
+        }
         return;
       }
 
       // F. Farmer/crops maintenance if seeds exist
       const wheatSeeds = craftBrain.countItem(bot, 'wheat_seeds');
       if (wheatSeeds > 5) {
-        const waterBlock = bot.findBlock({
-          matching: bot.registry.blocksByName['water'].id,
-          maxDistance: 16
-        });
+        const waterBlock = world.getNearestBlock(bot, 'water', 16);
         if (waterBlock) {
           bot.chat("Running a farming cycle...");
           await runAutonomyAction(bot, 'farming_cycle', { action: 'farm_cycle' });
@@ -526,7 +529,15 @@ async function surviveTick(bot) {
       const now = Date.now();
 
       // Look at nearby player if any
-      const nearbyPlayer = bot.nearestEntity(e => e.type === 'player' && e.position.distanceTo(bot.entity.position) <= 8);
+      const nearbyPlayers = world.getNearbyEntities(bot, 'player', 8);
+      let nearbyPlayer = null;
+      if (nearbyPlayers.length > 0) {
+        nearbyPlayer = nearbyPlayers.reduce((closest, current) => {
+          const distClosest = bot.entity.position.distanceTo(closest.position);
+          const distCurrent = bot.entity.position.distanceTo(current.position);
+          return distCurrent < distClosest ? current : closest;
+        });
+      }
       if (nearbyPlayer) {
         if (now - surviveState.lastLookTime > 3000) {
           surviveState.lastLookTime = now;

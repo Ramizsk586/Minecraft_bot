@@ -1,26 +1,19 @@
-// ─── Brain Controller ─────────────────────────────────────────────────────────
-// The brain handles basic bot needs INSTANTLY without calling the LLM.
-// It intercepts commands that match built-in behaviors and executes them
-// directly — no network round-trip, no "thinking" delay.
-//
-// The brain is the first layer of command processing:
-//   Player command → Brain (instant) → if not handled → LLM (slow)
-//
-// Autonomy loop: the brain periodically checks the bot's state and
-// takes automatic actions (eat, craft gear, equip armor) without prompting.
+// Brain Controller
+// Handles fast local behaviors before falling back to the LLM.
 
 const eatBrain = require('./eat');
 const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
 const craftBrain = require('./craft');
+const mineBrain = require('./mine');
 const surviveBrain = require('./survive');
+const chatBrain = require('./chat');
+const stuckBrain = require('./stuck');
 
 let _brainBot = null;
 let _brainOptions = {};
 let _autonomyHandle = null;
-
-// ─── Command Patterns ─────────────────────────────────────────────────────────
-// Regex patterns that the brain can handle without AI
+let _autonomyBusy = false;
 
 const EAT_PATTERNS = [
   /^eat$/i,
@@ -59,12 +52,11 @@ const COMBAT_REPORT_PATTERNS = [
   /^weapon[\s-]?(report|status|check|info)?$/i,
 ];
 
-// ── Craft patterns ──
 const CRAFT_PATTERNS = [
-  /^craft\s+(\d+)?\s*(.+)$/i,                     // "craft 3 iron sword" or "craft diamond pickaxe"
-  /^make\s+(\d+)?\s*(.+)$/i,                       // "make 5 bread"
-  /^create\s+(\d+)?\s*(.+)$/i,                     // "create wooden sword"
-  /^build\s+(a\s+)?(crafting[\s_]?table)$/i,        // "build a crafting table"
+  /^craft\s+(\d+)?\s*(.+)$/i,
+  /^make\s+(\d+)?\s*(.+)$/i,
+  /^create\s+(\d+)?\s*(.+)$/i,
+  /^build\s+(a\s+)?(crafting[\s_]?table)$/i,
 ];
 
 const CRAFT_SPECIAL_PATTERNS = [
@@ -94,82 +86,81 @@ const STICKS_PATTERNS = [
   /^(make|craft)\s*(all\s*)?(sticks?)$/i,
 ];
 
-// ─── Brain Interceptor ───────────────────────────────────────────────────────
+const MINE_PATTERNS = [
+  /^mine$/i,
+  /^mine\s+(.+)$/i,
+  /^gather\s+(wood|logs?)$/i,
+  /^chop\s+(tree|wood)$/i,
+  /^cut\s+(tree|wood)$/i,
+  /^auto[\s-]?(mine|mining)$/i,
+  /^start\s+(mining|gathering)$/i,
+];
 
-/**
- * Try to handle a command with built-in brain logic.
- * Returns true if handled (no need for LLM), false if the LLM should handle it.
- */
+const MINE_REPORT_PATTERNS = [
+  /^mine[\s-]?(report|status|check|info)?$/i,
+  /^threat[\s-]?(report|status|check|info)?$/i,
+  /^scan[\s-]?threat/i,
+];
+
 async function tryHandle(bot, command) {
   const trimmed = command.trim().toLowerCase();
 
-  // ── Eat commands ──
+  const handledChat = await chatBrain.tryHandleChat(bot, _brainOptions.owner || 'Player', command);
+  if (handledChat) return true;
+
   for (const pattern of EAT_PATTERNS) {
     const match = trimmed.match(pattern);
-    if (match) {
-      const specificFood = match[1];
-      if (specificFood && !['something', 'food', 'now', 'anything', 'me', 'yourself', 'bot'].includes(specificFood)) {
-        return await eatSpecific(bot, specificFood);
-      }
-      return await eatGeneral(bot);
+    if (!match) continue;
+    const specificFood = match[1];
+    if (specificFood && !['something', 'food', 'now', 'anything', 'me', 'yourself', 'bot'].includes(specificFood)) {
+      return await eatSpecific(bot, specificFood);
     }
+    return await eatGeneral(bot);
   }
 
-  // ── Food report commands ──
   for (const pattern of FOOD_REPORT_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      const lines = eatBrain.foodReport(bot);
-      for (const line of lines) { bot.chat(line); }
-      return true;
-    }
+    if (!pattern.test(trimmed)) continue;
+    const lines = eatBrain.foodReport(bot);
+    for (const line of lines) bot.chat(line);
+    return true;
   }
 
-  // ── Gear up ──
   for (const pattern of GEAR_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      await craftBrain.gearUp(bot);
-      return true;
-    }
+    if (!pattern.test(trimmed)) continue;
+    await craftBrain.gearUp(bot);
+    return true;
   }
 
-  // ── Planks conversion ──
   for (const pattern of PLANKS_PATTERNS) {
     if (pattern.test(trimmed)) {
       return await handleCraftPlanks(bot);
     }
   }
 
-  // ── Sticks crafting ──
   for (const pattern of STICKS_PATTERNS) {
     if (pattern.test(trimmed)) {
       return await handleCraftSticks(bot);
     }
   }
 
-  // ── Craft report ──
   for (const pattern of CRAFT_SPECIAL_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      const lines = craftBrain.craftReport(bot);
-      for (const line of lines) { bot.chat(line); }
-      return true;
-    }
+    if (!pattern.test(trimmed)) continue;
+    const lines = craftBrain.craftReport(bot);
+    for (const line of lines) bot.chat(line);
+    return true;
   }
 
-  // ── Craft commands ──
   for (const pattern of CRAFT_PATTERNS) {
     const match = trimmed.match(pattern);
-    if (match) {
-      const count = parseInt(match[1]) || 1;
-      let itemName = (match[2] || '').trim();
-      // Handle "build a crafting table"
-      if (!itemName && match[2]) itemName = match[2];
-      if (itemName) {
-        return await handleCraft(bot, itemName, count);
-      }
+    if (!match) continue;
+    const count = parseInt(match[1]) || 1;
+    let itemName = (match[2] || '').trim();
+    if (!itemName && match[2]) itemName = match[2];
+    if (itemName) {
+      return await handleCraft(bot, itemName, count);
     }
   }
 
-  // ── Combat commands ──
   for (const pattern of ATTACK_PATTERNS) {
     const match = trimmed.match(pattern);
     if (!match) continue;
@@ -180,20 +171,28 @@ async function tryHandle(bot, command) {
     return await attackNearest(bot);
   }
 
-  // ── Combat report ──
-  for (const pattern of COMBAT_REPORT_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      const lines = defanceBrain.defanceReport(bot);
-      for (const line of lines) { bot.chat(line); }
-      return true;
-    }
+  for (const pattern of MINE_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+    return await handleMineCommand(bot, trimmed, match[1] || null);
   }
 
-  // Not a brain command — let the LLM handle it
+  for (const pattern of COMBAT_REPORT_PATTERNS) {
+    if (!pattern.test(trimmed)) continue;
+    const lines = defanceBrain.defanceReport(bot);
+    for (const line of lines) bot.chat(line);
+    return true;
+  }
+
+  for (const pattern of MINE_REPORT_PATTERNS) {
+    if (!pattern.test(trimmed)) continue;
+    const lines = mineBrain.mineReport(bot, _brainOptions);
+    for (const line of lines) bot.chat(line);
+    return true;
+  }
+
   return false;
 }
-
-// ─── Eat Handlers ─────────────────────────────────────────────────────────────
 
 async function eatGeneral(bot) {
   const result = await eatBrain.eat(bot, { silent: false, force: false });
@@ -205,12 +204,7 @@ async function eatGeneral(bot) {
 
 async function eatSpecific(bot, foodName) {
   const normalized = foodName.replace(/\s+/g, '_').toLowerCase();
-
-  const item = bot.inventory.items().find(i => {
-    return i.name === normalized ||
-           i.name.includes(normalized) ||
-           normalized.includes(i.name);
-  });
+  const item = bot.inventory.items().find(i => i.name === normalized || i.name.includes(normalized) || normalized.includes(i.name));
 
   if (!item) {
     bot.chat(`Don't have ${foodName} in inventory.`);
@@ -228,16 +222,13 @@ async function eatSpecific(bot, foodName) {
   }
 
   if (foodData.harmful) {
-    bot.chat(`⚠️ ${item.name} is harmful (${foodData.effect}) — eating anyway...`);
+    bot.chat(`${item.name} is harmful (${foodData.effect}) - eating anyway...`);
   }
 
   try {
     await bot.equip(item, 'hand');
     await bot.consume();
-    bot.chat(
-      `🍖 Ate ${item.name} (+${foodData.hunger} hunger, +${foodData.saturation} sat) ` +
-      `| Food: ${bot.food}/20`
-    );
+    bot.chat(`Ate ${item.name} (+${foodData.hunger} hunger, +${foodData.saturation} sat) | Food: ${bot.food}/20`);
   } catch (err) {
     bot.chat(`Couldn't eat ${item.name}: ${err.message}`);
   }
@@ -245,19 +236,16 @@ async function eatSpecific(bot, foodName) {
   return true;
 }
 
-// ─── Craft Handlers ───────────────────────────────────────────────────────────
-
 async function handleCraft(bot, itemName, count) {
   const normalized = itemName.replace(/\s+/g, '_').toLowerCase();
 
-  // Handle "best sword", "best pickaxe", etc.
   if (normalized.startsWith('best_') || normalized.startsWith('best ')) {
     const type = normalized.replace(/^best[_ ]/, '');
-    const result = await craftBrain.craftBestTiered(bot, type, count);
+    await craftBrain.craftBestTiered(bot, type, count);
     return true;
   }
 
-  const result = await craftBrain.craft(bot, normalized, count);
+  await craftBrain.craft(bot, normalized, count);
   return true;
 }
 
@@ -267,10 +255,11 @@ async function handleCraftPlanks(bot) {
     bot.chat('No logs to convert to planks!');
     return true;
   }
-  bot.chat(`Converting ${ps.totalLogs} logs → ${ps.totalLogs * 4} planks...`);
+
+  bot.chat(`Converting ${ps.totalLogs} logs -> ${ps.totalLogs * 4} planks...`);
   const result = await craftBrain.craft(bot, 'planks', ps.totalLogs, { silent: true });
   if (result.success) {
-    bot.chat(`✅ Made ${ps.totalLogs * 4} planks!`);
+    bot.chat(`Made ${ps.totalLogs * 4} planks!`);
   }
   return true;
 }
@@ -278,7 +267,6 @@ async function handleCraftPlanks(bot) {
 async function handleCraftSticks(bot) {
   const plankCount = craftBrain.countAnyOf(bot, craftBrain.PLANK_TYPES);
   if (plankCount < 2) {
-    // Try making planks first
     const ps = craftBrain.plankStatus(bot);
     if (ps.totalLogs > 0) {
       await craftBrain.craft(bot, 'planks', Math.min(ps.totalLogs, 4), { silent: true });
@@ -294,15 +282,12 @@ async function handleCraftSticks(bot) {
   const batches = Math.floor(available / 2);
   const result = await craftBrain.craft(bot, 'stick', batches, { silent: true });
   if (result.success) {
-    bot.chat(`✅ Made ${batches * 4} sticks!`);
+    bot.chat(`Made ${batches * 4} sticks!`);
   }
   return true;
 }
 
-// ─── Attack Handlers ──────────────────────────────────────────────────────────
-
 async function attackNearest(bot) {
-  // Auto-craft weapon before attacking
   try {
     await craftBrain.ensureWeapon(bot);
   } catch {}
@@ -321,13 +306,11 @@ async function attackNearest(bot) {
 }
 
 async function attackSpecific(bot, targetName) {
-  // Auto-craft weapon before attacking
   try {
     await craftBrain.ensureWeapon(bot);
   } catch {}
 
   const normalized = targetName.trim().toLowerCase();
-
   const target = Object.values(bot.entities).find(entity => {
     const name = attackBrain.describeEntity(entity).toLowerCase();
     return name === normalized || name.includes(normalized) || normalized.includes(name);
@@ -345,19 +328,40 @@ async function attackSpecific(bot, targetName) {
   return true;
 }
 
-// ─── Autonomy Loop ────────────────────────────────────────────────────────────
-// Periodically checks bot state and takes proactive actions without prompting.
-// This is the "self-thinking" layer — the bot takes care of itself.
+async function handleMineCommand(bot, rawCommand, capturedTarget) {
+  const target = capturedTarget?.trim().toLowerCase();
 
-let _autonomyBusy = false;
+  if (rawCommand === 'mine' || rawCommand === 'auto mine' || rawCommand === 'auto mining' || rawCommand === 'start mining' || rawCommand === 'start gathering') {
+    mineBrain.setMiningMode(bot, 'mixed');
+    const result = await mineBrain.runMineDecision(bot, _brainOptions);
+    bot.chat(result.success ? `Mining brain active: ${result.reason}. Threat=${result.threat}.` : `Mining brain idle: ${result.reason}.`);
+    return true;
+  }
+
+  if (rawCommand.includes('gather wood') || rawCommand.includes('chop tree') || rawCommand.includes('cut tree') || ['wood', 'tree', 'logs', 'log'].includes(target)) {
+    mineBrain.setMiningMode(bot, 'wood');
+    const result = await mineBrain.cutTreeSafely(bot, _brainOptions);
+    if (!result.success) {
+      bot.chat(`Couldn't cut tree: ${result.reason}`);
+    } else {
+      bot.chat(`Chopped ${result.chopped} logs safely.`);
+      await mineBrain.ensureProgression(bot);
+    }
+    return true;
+  }
+
+  mineBrain.setMiningMode(bot, 'mixed');
+  const result = await mineBrain.runMineDecision(bot, _brainOptions);
+  bot.chat(result.success ? `Mining brain: ${result.reason}. Threat=${result.threat}.` : `Mining brain idle: ${result.reason}.`);
+  return true;
+}
 
 async function autonomyTick(bot) {
   if (_autonomyBusy) return;
   _autonomyBusy = true;
 
   try {
-    // 1. Auto-equip armor if we have any unequipped
-    const armorSlots = [5, 6, 7, 8]; // head, chest, legs, feet
+    const armorSlots = [5, 6, 7, 8];
     const armorTypes = ['helmet', 'chestplate', 'leggings', 'boots'];
     const armorDests = ['head', 'torso', 'legs', 'feet'];
 
@@ -365,54 +369,45 @@ async function autonomyTick(bot) {
       const equipped = bot.inventory.slots[armorSlots[i]];
       if (equipped) continue;
 
-      // Find best unequipped armor piece in inventory
       const tiers = ['netherite', 'diamond', 'iron', 'golden', 'chainmail', 'leather'];
       for (const tier of tiers) {
         const name = `${tier}_${armorTypes[i]}`;
         const item = bot.inventory.items().find(it => it.name === name);
-        if (item) {
-          try {
-            await bot.equip(item, armorDests[i]);
-            console.log(`🧠 Autonomy: equipped ${name}`);
-          } catch {}
-          break;
-        }
+        if (!item) continue;
+        try {
+          await bot.equip(item, armorDests[i]);
+          console.log(`Brain:Autonomy equipped ${name}`);
+        } catch {}
+        break;
       }
     }
 
-    // 2. If we have lots of wheat (>= 9) and no bread, craft bread
     const wheatCount = craftBrain.countItem(bot, 'wheat');
     const breadCount = craftBrain.countItem(bot, 'bread');
     if (wheatCount >= 9 && breadCount < 3) {
       const batches = Math.floor(wheatCount / 3);
       try {
         await craftBrain.craft(bot, 'bread', Math.min(batches, 5), { silent: true });
-        console.log(`🧠 Autonomy: auto-crafted bread from ${wheatCount} wheat`);
       } catch {}
     }
 
-    // 3. If we have logs but no planks and no crafting table, convert some logs
     const logCount = craftBrain.countAnyOf(bot, craftBrain.LOG_TYPES);
     const plankCount = craftBrain.countAnyOf(bot, craftBrain.PLANK_TYPES);
     const tableCount = craftBrain.countItem(bot, 'crafting_table');
     if (logCount >= 4 && plankCount === 0 && tableCount === 0) {
       try {
         await craftBrain.craft(bot, 'planks', 1, { silent: true });
-        console.log('🧠 Autonomy: auto-converted logs to planks');
       } catch {}
     }
 
-    // 4. If we have no weapon at all and have materials, craft one
     const bestWeapon = attackBrain.pickBestWeapon(bot);
     if (!bestWeapon && (logCount >= 2 || plankCount >= 2 || craftBrain.hasItem(bot, 'cobblestone', 2))) {
       try {
         await craftBrain.craftBestTiered(bot, 'sword', 1, { silent: true });
-        console.log('🧠 Autonomy: auto-crafted a sword');
       } catch {}
     }
-
   } catch (err) {
-    console.log(`🧠 Autonomy tick error: ${err.message}`);
+    console.log(`Brain:Autonomy tick error: ${err.message}`);
   } finally {
     _autonomyBusy = false;
   }
@@ -420,15 +415,13 @@ async function autonomyTick(bot) {
 
 function startAutonomy(bot) {
   stopAutonomy();
-  // Run autonomy check every 45 seconds
   _autonomyHandle = setInterval(() => {
     autonomyTick(bot).catch(err => {
-      console.log(`🧠 Autonomy error: ${err.message}`);
+      console.log(`Brain:Autonomy error: ${err.message}`);
     });
   }, 45000);
-  // First tick after 15s (let everything initialize)
   setTimeout(() => autonomyTick(bot).catch(() => {}), 15000);
-  console.log('🧠 Autonomy loop started (45s interval)');
+  console.log('Brain:Autonomy loop started (45s interval)');
 }
 
 function stopAutonomy() {
@@ -439,40 +432,50 @@ function stopAutonomy() {
   _autonomyBusy = false;
 }
 
-// ─── Brain Lifecycle ──────────────────────────────────────────────────────────
-
 function init(bot, options = {}) {
   _brainBot = bot;
   _brainOptions = options;
-  console.log('🧠 Brain initializing...');
+  console.log('Brain initializing...');
 
-  // Start the auto-eat background monitor
+  bot.isStuckRecovering = false;
+  bot.on('stuckRecovered', reason => {
+    bot.isStuckRecovering = false;
+    console.log(`Brain:Stuck recovered from ${reason}`);
+  });
+  bot.on('stuckGiveUp', reason => {
+    bot.isStuckRecovering = false;
+    console.log(`Brain:Stuck gave up on ${reason}`);
+  });
+
   eatBrain.startAutoEat(bot);
   defanceBrain.startAutoDefance(bot, options);
-
-  // Start autonomy loop (auto-equip armor, auto-craft essentials)
   startAutonomy(bot);
-
-  // Start autonomous survival system
+  mineBrain.startAutoMine(bot, options);
   surviveBrain.startAutonomy(bot, options);
+  stuckBrain.startMonitoring(bot, options.stuck || {});
 
-  console.log('🧠 Brain online — handling: eat, craft, combat, defance, gear up, autonomous survival');
-  console.log('🧠 Auto-eat monitor active (CRITICAL ≤6 | LOW ≤14 | FINE ≤17 | FULL >17)');
-  console.log('🧠 Auto-defance monitor active (damage react → equip best weapon → counterattack)');
-  console.log('🧠 Autonomy loop active (auto-equip armor, auto-craft essentials)');
-  console.log('🧠 Autonomous survival system active (takes over on 30s idle)');
+  console.log('Brain online - handling: eat, craft, combat, defance, mining, gear up, autonomous survival, stuck recovery');
+  console.log('Auto-eat monitor active');
+  console.log('Auto-defance monitor active');
+  console.log('Auto-mine monitor active');
+  console.log('Autonomy loop active');
+  console.log('Autonomous survival system active');
+  console.log('Stuck recovery monitor active');
 }
 
 function shutdown() {
   eatBrain.stopAutoEat();
   stopAutonomy();
+  mineBrain.stopAutoMine();
   surviveBrain.stopAutonomy();
+  stuckBrain.stopMonitoring();
   if (_brainBot) {
     defanceBrain.stopAutoDefance(_brainBot);
+    _brainBot.isStuckRecovering = false;
   }
   _brainBot = null;
   _brainOptions = {};
-  console.log('🧠 Brain shutdown');
+  console.log('Brain shutdown');
 }
 
 module.exports = {
@@ -483,5 +486,8 @@ module.exports = {
   attack: attackBrain,
   defance: defanceBrain,
   craft: craftBrain,
+  mine: mineBrain,
   survive: surviveBrain,
+  chat: chatBrain,
+  stuck: stuckBrain,
 };
