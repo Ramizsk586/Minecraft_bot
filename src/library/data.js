@@ -1,6 +1,8 @@
 const blockDropMap = require('./modules/irems/blockDropMap.json');
 const mobMap = require('./modules/irems/mobMap.json');
 const craftRecipes = require('./modules/irems/craft.json');
+const builds = require('./builds');
+const cook = require('./cook');
 const { resolveItemName } = require('./modules/itemNameResolver');
 
 function normalizeKey(name) {
@@ -42,16 +44,38 @@ function listKnownRecipes() {
   return Object.keys(craftRecipes);
 }
 
+function getBuild(name) {
+  return builds.getBlueprint(name);
+}
+
+function listKnownBuilds() {
+  return builds.listBlueprints();
+}
+
+function getCookableFood(name) {
+  return cook.getCookableFoodInfo(name);
+}
+
+function getSmeltableOre(name) {
+  return cook.getOreCookingInfo(name);
+}
+
 module.exports = {
   blockDropMap,
   mobMap,
   craftRecipes,
+  builds: builds.BLUEPRINTS,
+  cook,
   getBlockDrop,
   getMobInfo,
   getRecipe,
+  getBuild,
+  getCookableFood,
+  getSmeltableOre,
   isHostileMob,
   getMobThreat,
   listKnownBlocks,
   listKnownMobs,
   listKnownRecipes,
+  listKnownBuilds,
 };

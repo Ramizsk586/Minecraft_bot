@@ -1,0 +1,65 @@
+{
+  "raw_iron": {
+    "result": "iron_ingot",
+    "sourceBlocks": ["iron_ore", "deepslate_iron_ore"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 6,
+    "priority": 10,
+    "tags": ["progression", "tools", "armor"]
+  },
+  "raw_gold": {
+    "result": "gold_ingot",
+    "sourceBlocks": ["gold_ore", "deepslate_gold_ore", "nether_gold_ore"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 4,
+    "priority": 6,
+    "tags": ["utility", "barter", "food"]
+  },
+  "raw_copper": {
+    "result": "copper_ingot",
+    "sourceBlocks": ["copper_ore", "deepslate_copper_ore"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 8,
+    "priority": 3,
+    "tags": ["building", "storage"]
+  },
+  "sand": {
+    "result": "glass",
+    "sourceBlocks": ["sand", "red_sand"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 8,
+    "priority": 5,
+    "tags": ["building", "windows"]
+  },
+  "cobblestone": {
+    "result": "stone",
+    "sourceBlocks": ["stone"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 8,
+    "priority": 2,
+    "tags": ["building"]
+  },
+  "clay_ball": {
+    "result": "brick",
+    "sourceBlocks": ["clay"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 8,
+    "priority": 2,
+    "tags": ["building"]
+  },
+  "ancient_debris": {
+    "result": "netherite_scrap",
+    "sourceBlocks": ["ancient_debris"],
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "batchGoal": 2,
+    "priority": 9,
+    "tags": ["endgame"]
+  }
+}

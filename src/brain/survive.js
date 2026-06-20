@@ -15,6 +15,7 @@ const craftBrain = require('./craft');
 const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
 const mineBrain = require('./mine');
+const cookController = require('../cook');
 
 // Library dependencies
 const world = require('../library/world');
@@ -111,9 +112,16 @@ async function surviveTick(bot) {
   if (bot._combatState?.target || bot.health <= 0) return;
 
   try {
+    const threatReport = mineBrain.scanThreatLevel(bot, _surviveOptions);
+
     // ══════════════════════ PRIORITY 1: HEAL / HUNGER ══════════════════════
     if (bot.food < 13 || bot.health < 10) {
-      const result = await skills.eatFood(bot);
+      const result = await eatBrain.eat(bot, {
+        silent: false,
+        force: false,
+        threatLevel: threatReport.level,
+        preferCooking: threatReport.level === 'none' && bot.food >= 8 && bot.health >= 12,
+      });
       if (result.ate) {
         await sleep(1000);
         return;
@@ -121,7 +129,6 @@ async function surviveTick(bot) {
     }
 
     // ══════════════════════ PRIORITY 2: THREAT ENGAGEMENT ══════════════════════
-    const threatReport = mineBrain.scanThreatLevel(bot, _surviveOptions);
     if (threatReport.level !== 'none' && threatReport.primaryThreat) {
       console.log(`[Autonomy] Threat detected (${threatReport.level}). Initiating defense.`);
       if (threatReport.level === 'high') {
@@ -449,47 +456,26 @@ async function surviveTick(bot) {
 
       // Step 8: Smelt Iron Ore
       if (rawIron >= 3 && ironIngots < 3 && !surviveState.smeltingActive) {
-        const furnaceItem = bot.inventory.items().find(i => i.name === 'furnace');
-        const coalItem = bot.inventory.items().find(i => i.name === 'coal');
-        
-        if (furnaceItem && coalItem) {
-          const ref = findPlacementBlock(bot);
-          if (ref) {
-            bot.chat("Smelting raw iron...");
-            _surviveBusy = true;
-            bot._currentTask = 'autonomy:smelting_setup';
-            try {
-              // Place furnace
-              await bot.equip(furnaceItem, 'hand');
-              const furnacePos = ref.position.offset(0, 1, 0);
-              await bot.placeBlock(ref, new Vec3(0, 1, 0));
-              surviveState.furnacePos = furnacePos;
-              await sleep(500);
-
-              const block = bot.blockAt(furnacePos);
-              if (block && block.name === 'furnace') {
-                const container = await bot.openContainer(block);
-                
-                // Input raw iron
-                const rawIronItem = bot.inventory.items().find(i => i.name === 'raw_iron' || i.name === 'iron_ore' || i.name === 'deepslate_iron_ore');
-                await container.deposit(rawIronItem.type, null, rawIronItem.count);
-                
-                // Input fuel
-                await container.deposit(coalItem.type, null, Math.min(coalItem.count, 2));
-                
-                container.close();
-                surviveState.smeltingActive = true;
-                surviveState.lastFurnaceCheck = Date.now();
-                bot.chat("Furnace is burning. Smelting active!");
-              }
-            } catch (err) {
-              console.log('Smelting setup failed:', err.message);
+        bot.chat("Smelting best available ore...");
+        _surviveBusy = true;
+        bot._currentTask = 'autonomy:smelting_setup';
+        try {
+          const smeltResult = await cookController.smeltBestOre(bot);
+          if (smeltResult.success) {
+            const station = cookController.findNearbyCookingBlock(bot);
+            if (station) {
+              surviveState.furnacePos = station.position.clone();
+              surviveState.smeltingActive = true;
+              surviveState.lastFurnaceCheck = Date.now();
+              bot.chat("Cooking brain started the smelting cycle.");
             }
-            _surviveBusy = false;
-            bot._currentTask = null;
-            return;
           }
+        } catch (err) {
+          console.log('Smelting setup failed:', err.message);
         }
+        _surviveBusy = false;
+        bot._currentTask = null;
+        return;
       }
 
       // Step 9: Craft Iron Pickaxe & Weapon
@@ -521,6 +507,14 @@ async function surviveTick(bot) {
         if (waterBlock) {
           bot.chat("Running a farming cycle...");
           await runAutonomyAction(bot, 'farming_cycle', { action: 'farm_cycle' });
+          return;
+        }
+      }
+
+      if (bot.food >= 10 && bot.health >= 14 && threatReport.level === 'none') {
+        const cooked = await cookController.cookBestFood(bot);
+        if (cooked.success) {
+          bot.chat("Started cooking better food for later.");
           return;
         }
       }

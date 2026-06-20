@@ -1,6 +1,7 @@
 const { sleep } = require('../utils');
 const { Vec3 } = require('vec3');
 const { placeBlockAt } = require('./building');
+const libraryBuilds = require('../library/builds');
 
 const LOG_TO_PLANK = {
   oak_log: 'oak_planks',
@@ -16,138 +17,7 @@ const LOG_TO_PLANK = {
 const PLANK_TYPES = Object.values(LOG_TO_PLANK);
 const LOG_TYPES = Object.keys(LOG_TO_PLANK);
 
-const HOUSE_BLUEPRINTS = {
-  starter_cottage: {
-    id: 'starter_cottage',
-    name: 'Starter Cottage MkII',
-    kind: 'house',
-    description: 'A sturdier survival cottage with a framed doorway, plank deck, cobblestone walls, raised roof, rear windows, front porch, and practical starter interior.',
-    footprint: { width: 9, depth: 7 },
-    wallHeight: 4,
-    totalHeight: 7,
-    recommendedFacing: 'south',
-    gatherPlan: {
-      logs: 28,
-      cobblestone: 72,
-      sand: 6,
-      coal: 2,
-    },
-    materials: {
-      required: {
-        oak_planks: 126,
-        oak_log: 20,
-        cobblestone: 72,
-        glass_pane: 6,
-      },
-      optional: {
-        crafting_table: 1,
-        furnace: 1,
-        chest: 1,
-        torch: 4,
-      },
-    },
-    notes: [
-      'The cottage includes a front porch, centered entrance, interior workspace, and a thicker roof profile.',
-      'If required materials are missing, the bot now attempts to gather logs, cobblestone, sand, and fuel before building.',
-      'Optional furnishings are placed only if the bot has them or can craft them from current inventory.',
-    ],
-  },
-  crop_farm_plot: {
-    id: 'crop_farm_plot',
-    name: 'Crop Farm Plot',
-    kind: 'farm',
-    description: 'A compact starter farm plot with plank border, central water lane, and room for wheat, carrots, potatoes, or beetroot.',
-    footprint: { width: 9, depth: 9 },
-    wallHeight: 1,
-    totalHeight: 2,
-    recommendedFacing: 'south',
-    gatherPlan: {
-      logs: 10,
-      cobblestone: 0,
-      sand: 0,
-      coal: 0,
-    },
-    materials: {
-      required: {
-        oak_planks: 36,
-      },
-      optional: {
-        water_bucket: 1,
-        torch: 4,
-        wheat_seeds: 16,
-      },
-    },
-    notes: [
-      'The farm plot builds a border and work area; after building, use create_farm or plant to finish the crop setup.',
-      'Best placed on flat ground near water or with a water bucket available.',
-    ],
-  },
-  animal_pen: {
-    id: 'animal_pen',
-    name: 'Animal Breeding Pen',
-    kind: 'breeding',
-    description: 'A fenced breeding yard with gate opening, feeding lane, and a tiny covered corner for animal management.',
-    footprint: { width: 9, depth: 9 },
-    wallHeight: 2,
-    totalHeight: 4,
-    recommendedFacing: 'south',
-    gatherPlan: {
-      logs: 20,
-      cobblestone: 12,
-      sand: 0,
-      coal: 0,
-    },
-    materials: {
-      required: {
-        oak_fence: 24,
-        oak_planks: 28,
-        cobblestone: 12,
-      },
-      optional: {
-        oak_fence_gate: 1,
-        torch: 4,
-        chest: 1,
-      },
-    },
-    notes: [
-      'Use this for cows, sheep, pigs, or chickens once animals are lured inside.',
-      'If no fence gate is available, the pen still works with a simple fenced opening.',
-    ],
-  },
-  cooking_shack: {
-    id: 'cooking_shack',
-    name: 'Cooking Shack',
-    kind: 'cooking',
-    description: 'A compact outdoor kitchen with furnace wall, prep counter, fuel chest spot, and covered roof for food processing.',
-    footprint: { width: 7, depth: 5 },
-    wallHeight: 3,
-    totalHeight: 5,
-    recommendedFacing: 'south',
-    gatherPlan: {
-      logs: 14,
-      cobblestone: 24,
-      sand: 0,
-      coal: 0,
-    },
-    materials: {
-      required: {
-        oak_planks: 42,
-        oak_log: 8,
-        cobblestone: 24,
-      },
-      optional: {
-        furnace: 2,
-        chest: 1,
-        torch: 2,
-        crafting_table: 1,
-      },
-    },
-    notes: [
-      'The shack is meant for smelting food and basic kitchen staging.',
-      'Optional furnaces and storage are inserted automatically if available.',
-    ],
-  },
-};
+const HOUSE_BLUEPRINTS = libraryBuilds.BLUEPRINTS;
 
 function normalizeFacing(facing) {
   return ['north', 'south', 'east', 'west'].includes(facing) ? facing : 'south';
@@ -174,159 +44,40 @@ function addRect(stages, stageName, block, x1, x2, y, z1, z2, optional = false) 
   }
 }
 
-function generateStarterCottagePlan(origin, facing) {
-  const stages = [];
-
-  addRect(stages, 'foundation_floor', 'oak_planks', 0, 8, 0, 0, 6);
-  addRect(stages, 'front_porch', 'oak_planks', 2, 6, 0, -1, -1);
-
-  const supportColumns = [
-    [0, 1, 0], [0, 2, 0], [0, 3, 0], [0, 4, 0],
-    [8, 1, 0], [8, 2, 0], [8, 3, 0], [8, 4, 0],
-    [0, 1, 6], [0, 2, 6], [0, 3, 6], [0, 4, 6],
-    [8, 1, 6], [8, 2, 6], [8, 3, 6], [8, 4, 6],
-    [3, 1, 0], [3, 2, 0], [5, 1, 0], [5, 2, 0],
-  ];
-  for (const [x, y, z] of supportColumns) {
-    addStageBlock(stages, 'frame', 'oak_log', x, y, z);
-  }
-
-  const doorway = new Set(['4,1,0', '4,2,0']);
-  const windows = new Set(['0,2,2', '0,2,4', '8,2,2', '8,2,4', '3,2,6', '5,2,6']);
-  const woodTrim = new Set(['4,3,0', '4,4,0', '3,3,6', '4,3,6', '5,3,6']);
-  const supportKeys = new Set(supportColumns.map(([x, y, z]) => `${x},${y},${z}`));
-
-  for (let y = 1; y <= 4; y++) {
-    for (let x = 0; x <= 8; x++) {
-      for (let z = 0; z <= 6; z++) {
-        const onPerimeter = x === 0 || x === 8 || z === 0 || z === 6;
-        if (!onPerimeter) continue;
-
-        const key = `${x},${y},${z}`;
-        if (doorway.has(key) || windows.has(key) || supportKeys.has(key)) continue;
-
-        const block = woodTrim.has(key) ? 'oak_log' : 'cobblestone';
-        addStageBlock(stages, 'walls', block, x, y, z);
-      }
+function expandPhaseBlocks(stages, phase) {
+  for (const entry of phase.blocks || []) {
+    if (entry.rect) {
+      addRect(
+        stages,
+        phase.name,
+        entry.block,
+        entry.rect.x1,
+        entry.rect.x2,
+        entry.rect.y,
+        entry.rect.z1,
+        entry.rect.z2,
+        !!entry.optional
+      );
+    } else {
+      addStageBlock(stages, phase.name, entry.block, entry.x, entry.y, entry.z, !!entry.optional);
     }
   }
-
-  for (const key of windows) {
-    const [x, y, z] = key.split(',').map(Number);
-    addStageBlock(stages, 'windows', 'glass_pane', x, y, z);
-  }
-
-  addRect(stages, 'ceiling_ring', 'oak_planks', 0, 8, 5, 0, 6);
-  addRect(stages, 'roof_mid', 'oak_planks', 1, 7, 6, 1, 5);
-  addRect(stages, 'roof_peak', 'oak_planks', 2, 6, 7, 2, 4);
-
-  addStageBlock(stages, 'interior', 'crafting_table', 1, 1, 1, true);
-  addStageBlock(stages, 'interior', 'furnace', 2, 1, 1, true);
-  addStageBlock(stages, 'interior', 'chest', 7, 1, 1, true);
-  addStageBlock(stages, 'interior', 'torch', 2, 3, 2, true);
-  addStageBlock(stages, 'interior', 'torch', 6, 3, 2, true);
-  addStageBlock(stages, 'interior', 'torch', 2, 3, 5, true);
-  addStageBlock(stages, 'interior', 'torch', 6, 3, 5, true);
-
-  return stages.map(entry => ({ ...entry, world: transform(origin, facing, entry.x, entry.y, entry.z) }));
 }
 
-function generateCropFarmPlotPlan(origin, facing) {
+function buildPlanFromJson(blueprint, origin, facing) {
   const stages = [];
-
-  for (let x = 0; x < 9; x++) {
-    for (let z = 0; z < 9; z++) {
-      const edge = x === 0 || x === 8 || z === 0 || z === 8;
-      if (edge) {
-        addStageBlock(stages, 'border', 'oak_planks', x, 0, z);
-      }
-    }
+  for (const phase of blueprint.phases || []) {
+    expandPhaseBlocks(stages, phase);
   }
-
-  for (let z = 1; z <= 7; z++) {
-    addStageBlock(stages, 'walkway', 'oak_planks', 4, 0, z);
-  }
-
-  addStageBlock(stages, 'lighting', 'torch', 1, 1, 1, true);
-  addStageBlock(stages, 'lighting', 'torch', 7, 1, 1, true);
-  addStageBlock(stages, 'lighting', 'torch', 1, 1, 7, true);
-  addStageBlock(stages, 'lighting', 'torch', 7, 1, 7, true);
-
   return stages.map(entry => ({ ...entry, world: transform(origin, facing, entry.x, entry.y, entry.z) }));
 }
 
-function generateAnimalPenPlan(origin, facing) {
-  const stages = [];
-
-  addRect(stages, 'floor_ring', 'oak_planks', 0, 8, 0, 0, 8);
-
-  const corners = [
-    [0, 1, 0], [0, 2, 0], [8, 1, 0], [8, 2, 0],
-    [0, 1, 8], [0, 2, 8], [8, 1, 8], [8, 2, 8],
-  ];
-  for (const [x, y, z] of corners) {
-    addStageBlock(stages, 'posts', 'oak_log', x, y, z);
-  }
-
-  for (let x = 1; x <= 7; x++) {
-    if (x !== 4) addStageBlock(stages, 'fence_wall', 'oak_fence', x, 1, 0);
-    addStageBlock(stages, 'fence_wall', 'oak_fence', x, 1, 8);
-  }
-  for (let z = 1; z <= 7; z++) {
-    addStageBlock(stages, 'fence_wall', 'oak_fence', 0, 1, z);
-    addStageBlock(stages, 'fence_wall', 'oak_fence', 8, 1, z);
-  }
-
-  addStageBlock(stages, 'gate', 'oak_fence_gate', 4, 1, 0, true);
-  addRect(stages, 'shelter_base', 'cobblestone', 1, 3, 1, 6, 8);
-  addRect(stages, 'shelter_roof', 'oak_planks', 1, 3, 3, 6, 8);
-  addStageBlock(stages, 'interior', 'chest', 2, 1, 7, true);
-  addStageBlock(stages, 'lighting', 'torch', 1, 2, 1, true);
-  addStageBlock(stages, 'lighting', 'torch', 7, 2, 1, true);
-  addStageBlock(stages, 'lighting', 'torch', 1, 2, 7, true);
-  addStageBlock(stages, 'lighting', 'torch', 7, 2, 7, true);
-
-  return stages.map(entry => ({ ...entry, world: transform(origin, facing, entry.x, entry.y, entry.z) }));
-}
-
-function generateCookingShackPlan(origin, facing) {
-  const stages = [];
-
-  addRect(stages, 'floor', 'oak_planks', 0, 6, 0, 0, 4);
-
-  const supports = [
-    [0, 1, 0], [0, 2, 0], [6, 1, 0], [6, 2, 0],
-    [0, 1, 4], [0, 2, 4], [6, 1, 4], [6, 2, 4],
-  ];
-  for (const [x, y, z] of supports) {
-    addStageBlock(stages, 'frame', 'oak_log', x, y, z);
-  }
-
-  for (let x = 1; x <= 5; x++) {
-    addStageBlock(stages, 'back_wall', 'cobblestone', x, 1, 4);
-    addStageBlock(stages, 'back_wall', 'cobblestone', x, 2, 4);
-  }
-
-  addRect(stages, 'roof', 'oak_planks', 0, 6, 3, 0, 4);
-  addStageBlock(stages, 'kitchen', 'furnace', 1, 1, 3, true);
-  addStageBlock(stages, 'kitchen', 'furnace', 2, 1, 3, true);
-  addStageBlock(stages, 'kitchen', 'crafting_table', 4, 1, 3, true);
-  addStageBlock(stages, 'kitchen', 'chest', 5, 1, 3, true);
-  addStageBlock(stages, 'lighting', 'torch', 1, 2, 1, true);
-  addStageBlock(stages, 'lighting', 'torch', 5, 2, 1, true);
-
-  return stages.map(entry => ({ ...entry, world: transform(origin, facing, entry.x, entry.y, entry.z) }));
-}
-
-function getBlueprint(name = 'starter_cottage') {
-  return HOUSE_BLUEPRINTS[name] || HOUSE_BLUEPRINTS.starter_cottage;
+function getBlueprint(name = 'home') {
+  return libraryBuilds.getBlueprint(name);
 }
 
 function generateBlueprintPlan(blueprint, origin, facing) {
-  if (blueprint.id === 'crop_farm_plot') return generateCropFarmPlotPlan(origin, facing);
-  if (blueprint.id === 'animal_pen') return generateAnimalPenPlan(origin, facing);
-  if (blueprint.id === 'cooking_shack') return generateCookingShackPlan(origin, facing);
-  return generateStarterCottagePlan(origin, facing);
+  return buildPlanFromJson(blueprint, origin, facing);
 }
 
 function countInventory(bot, itemName) {
@@ -552,6 +303,20 @@ async function ensureFenceAndGate(bot, blueprint) {
   }
 }
 
+async function ensureLadders(bot, needed) {
+  if (!needed || countInventory(bot, 'ladder') >= needed) return true;
+  const recipes = bot.recipesFor(bot.registry.itemsByName['ladder']?.id, null, 1, null);
+  if (!recipes.length) return false;
+  const missing = needed - countInventory(bot, 'ladder');
+  const batches = Math.ceil(missing / 3);
+  try {
+    await bot.craft(recipes[0], batches, null);
+  } catch (err) {
+    console.log(`builder craft ladder failed: ${err.message}`);
+  }
+  return countInventory(bot, 'ladder') >= needed;
+}
+
 async function ensureGlassPanes(bot, needed) {
   if (countInventory(bot, 'glass_pane') >= needed) return true;
 
@@ -664,6 +429,9 @@ async function gatherMaterialsForBlueprint(bot, blueprint) {
   if (blueprint.materials.required.oak_fence && countInventory(bot, 'oak_fence') < blueprint.materials.required.oak_fence) {
     tasks.push('fence');
   }
+  if (blueprint.materials.required.ladder && countInventory(bot, 'ladder') < blueprint.materials.required.ladder) {
+    tasks.push('ladder');
+  }
 
   if (tasks.length === 0) return true;
 
@@ -694,6 +462,7 @@ async function gatherMaterialsForBlueprint(bot, blueprint) {
   const planksOk = await ensurePlanks(bot, blueprint.materials.required.oak_planks || 0);
   const panesOk = blueprint.materials.required.glass_pane ? await ensureGlassPanes(bot, blueprint.materials.required.glass_pane) : true;
   await ensureFenceAndGate(bot, blueprint);
+  await ensureLadders(bot, blueprint.materials.required.ladder || 0);
   await ensureOptionalInterior(bot);
 
   return planksOk && panesOk;
@@ -818,7 +587,6 @@ module.exports = {
   HOUSE_BLUEPRINTS,
   getBlueprint,
   getMaterialStatus,
-  generateStarterCottagePlan,
   generateBlueprintPlan,
   gatherMaterialsForBlueprint,
   register,

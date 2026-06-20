@@ -3,6 +3,8 @@
 // its hunger/saturation values, and side effects. Picks the most efficient
 // food based on current hunger deficit — no AI round-trip needed.
 
+const cookData = require('../library/cook');
+
 // ─── Complete Minecraft Food Database ─────────────────────────────────────────
 // Each entry: { hunger, saturation, harmful, effect }
 // hunger     = hunger points restored (half drumsticks, max 20)
@@ -15,6 +17,7 @@ const FOOD_DB = {
   enchanted_golden_apple: { hunger: 4,  saturation: 9.6,  harmful: false, effect: 'Absorption IV, Regen II, Resistance, Fire Resistance' },
   golden_apple:           { hunger: 4,  saturation: 9.6,  harmful: false, effect: 'Absorption, Regen II' },
   golden_carrot:          { hunger: 6,  saturation: 14.4, harmful: false, effect: null },
+  cooked_sniffer_egg:     { hunger: 10, saturation: 14.4, harmful: false, effect: null },
 
   // ══════════════════════ A-TIER: Cooked meats ══════════════════════
   cooked_beef:            { hunger: 8,  saturation: 12.8, harmful: false, effect: null },
@@ -34,6 +37,15 @@ const FOOD_DB = {
   suspicious_stew:        { hunger: 6,  saturation: 7.2,  harmful: false, effect: 'varies' },
   pumpkin_pie:            { hunger: 8,  saturation: 4.8,  harmful: false, effect: null },
   honey_bottle:           { hunger: 6,  saturation: 1.2,  harmful: false, effect: 'Clears poison' },
+  cooked_carrot:          { hunger: 6,  saturation: 7.2,  harmful: false, effect: null },
+  baked_apple:            { hunger: 6,  saturation: 7.2,  harmful: false, effect: null },
+  fried_egg:              { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
+  cooked_rotten_flesh:    { hunger: 5,  saturation: 6.0,  harmful: false, effect: null },
+  roasted_pumpkin:        { hunger: 6,  saturation: 7.2,  harmful: false, effect: null },
+  roasted_poisonous_potato:{ hunger: 5, saturation: 6.0, harmful: false, effect: null },
+  cooked_turtle_egg:      { hunger: 5,  saturation: 6.0,  harmful: false, effect: null },
+  roasted_brown_mushroom: { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
+  roasted_red_mushroom:   { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
 
   // ══════════════════════ C-TIER: Snacks ══════════════════════
   apple:                  { hunger: 4,  saturation: 2.4,  harmful: false, effect: null },
@@ -45,6 +57,13 @@ const FOOD_DB = {
   dried_kelp:             { hunger: 1,  saturation: 0.6,  harmful: false, effect: null },
   beetroot:               { hunger: 1,  saturation: 1.2,  harmful: false, effect: null },
   chorus_fruit:           { hunger: 4,  saturation: 2.4,  harmful: false, effect: 'Random teleport' },
+  cooked_sweet_berries:   { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
+  cooked_beetroot:        { hunger: 3,  saturation: 3.6,  harmful: false, effect: null },
+  cooked_tropical_fish:   { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
+  cooked_pufferfish:      { hunger: 3,  saturation: 3.6,  harmful: false, effect: null },
+  cooked_spider_eye:      { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
+  cooked_glow_berries:    { hunger: 4,  saturation: 4.8,  harmful: false, effect: null },
+  roasted_melon_slice:    { hunger: 5,  saturation: 6.0,  harmful: false, effect: null },
 
   // ══════════════════════ D-TIER: Raw meat (safe) ══════════════════════
   raw_beef:               { hunger: 3,  saturation: 1.8,  harmful: false, effect: null },
@@ -54,6 +73,13 @@ const FOOD_DB = {
   raw_cod:                { hunger: 2,  saturation: 0.4,  harmful: false, effect: null },
   raw_salmon:             { hunger: 2,  saturation: 0.4,  harmful: false, effect: null },
   potato:                 { hunger: 1,  saturation: 0.6,  harmful: false, effect: null },
+  tropical_fish:          { hunger: 1,  saturation: 0.2,  harmful: false, effect: null },
+  egg:                    { hunger: 0,  saturation: 0.0,  harmful: false, effect: null },
+  turtle_egg:             { hunger: 0,  saturation: 0.0,  harmful: false, effect: null },
+  sniffer_egg:            { hunger: 0,  saturation: 0.0,  harmful: false, effect: null },
+  brown_mushroom:         { hunger: 0,  saturation: 0.0,  harmful: false, effect: null },
+  red_mushroom:           { hunger: 0,  saturation: 0.0,  harmful: false, effect: null },
+  pumpkin:                { hunger: 0,  saturation: 0.0,  harmful: false, effect: null },
 
   // ══════════════════════ F-TIER: Harmful / desperate ══════════════════════
   raw_chicken:            { hunger: 2,  saturation: 1.2,  harmful: true,  effect: '30% Hunger effect' },
@@ -175,6 +201,42 @@ function pickBestFood(bot) {
   return ranked.length > 0 ? ranked[0] : null;
 }
 
+function isRawFood(itemName) {
+  return typeof itemName === 'string' && (
+    itemName.startsWith('raw_') ||
+    ['potato', 'kelp', 'tropical_fish', 'egg'].includes(itemName)
+  );
+}
+
+function pickBestImmediateFood(bot, options = {}) {
+  const { allowHarmful = true } = options;
+  const ranked = rankFoods(bot);
+  const filtered = ranked.filter(entry => {
+    if (!allowHarmful && entry.foodData.harmful) return false;
+    return true;
+  });
+  return filtered[0] || null;
+}
+
+function shouldCookBeforeEating(bot, options = {}) {
+  const {
+    threatLevel = 'none',
+    health = bot.health ?? 20,
+    food = bot.food ?? 20,
+    force = false,
+  } = options;
+
+  if (force) return false;
+  if (health <= 8) return false;
+  if (food <= 6) return false;
+  if (threatLevel === 'high' || threatLevel === 'medium') return false;
+
+  const bestReady = pickBestFood(bot);
+  if (bestReady && !isRawFood(bestReady.item.name)) return false;
+
+  return !!cookData.getBestCookableFood(bot);
+}
+
 /**
  * Execute eating — equip and consume the best food. Returns immediately,
  * no LLM call needed.
@@ -186,7 +248,7 @@ function pickBestFood(bot) {
  * @returns {Promise<{ate: boolean, item: string|null, foodBefore: number, foodAfter: number}>}
  */
 async function eat(bot, options = {}) {
-  const { silent = false, force = false } = options;
+  const { silent = false, force = false, threatLevel = 'none', preferCooking = false } = options;
   const foodBefore = bot.food;
 
   // Don't eat if full (unless forced)
@@ -201,6 +263,25 @@ async function eat(bot, options = {}) {
   }
 
   let best = pickBestFood(bot);
+  const cookingPreferred = preferCooking || shouldCookBeforeEating(bot, {
+    threatLevel,
+    health: bot.health,
+    food: foodBefore,
+    force,
+  });
+
+  if (cookingPreferred) {
+    try {
+      await require('../cook').cookBestFood(bot);
+    } catch {}
+
+    best = pickBestFood(bot);
+  }
+
+  if (!best) {
+    best = pickBestImmediateFood(bot, { allowHarmful: foodBefore <= 6 || force });
+  }
+
   if (!best) {
     // Try to craft food before giving up
     try {
@@ -254,6 +335,7 @@ async function eat(bot, options = {}) {
 function foodReport(bot) {
   const ranked = rankFoods(bot);
   const lines = [];
+  const bestCookable = cookData.getBestCookableFood(bot);
 
   lines.push(`🧠 Food Report | Hunger: ${bot.food}/20 | Deficit: ${20 - bot.food}`);
 
@@ -279,6 +361,9 @@ function foodReport(bot) {
   }
 
   lines.push(`Best choice: ${ranked[0].item.name} — ${ranked[0].reason}`);
+  if (bestCookable) {
+    lines.push(`Best raw food to cook: ${bestCookable.item.name} -> ${bestCookable.info.result}`);
+  }
   return lines;
 }
 
@@ -307,18 +392,22 @@ function startAutoEat(bot) {
 
     try {
       const food = bot.food;
+      let threatLevel = 'none';
+      try {
+        threatLevel = require('./mine').scanThreatLevel(bot).level;
+      } catch {}
 
       if (food <= 6) {
-        // CRITICAL — eat immediately, craft food if needed
+        // CRITICAL — eat immediately, even raw if needed
         _isEating = true;
         console.log(`🧠 Brain:Eat [CRITICAL] food=${food}/20 — eating NOW`);
-        const result = await eat(bot, { silent: false, force: true });
+        const result = await eat(bot, { silent: false, force: true, threatLevel, preferCooking: false });
         if (!result.ate) {
           // Desperate: try crafting food
           try {
             const craftBrain = require('./craft');
             await craftBrain.craftFoodIfPossible(bot, { silent: false });
-            await eat(bot, { silent: false, force: true });
+            await eat(bot, { silent: false, force: true, threatLevel, preferCooking: false });
           } catch {}
         }
         _isEating = false;
@@ -328,16 +417,24 @@ function startAutoEat(bot) {
         // LOW — eat soon
         _isEating = true;
         console.log(`🧠 Brain:Eat [LOW] food=${food}/20 — eating`);
-        await eat(bot, { silent: true });
+        await eat(bot, {
+          silent: true,
+          threatLevel,
+          preferCooking: threatLevel === 'none' && food >= 9,
+        });
         _isEating = false;
         _autoEatHandle = setTimeout(tick, 10000);
       } else if (food <= 17) {
-        // FINE — eat if we have good food available
+        // FINE — eat if we have good food available, otherwise cook in calm situations
         const best = pickBestFood(bot);
         if (best && best.score >= 1.5) {
           _isEating = true;
-          await eat(bot, { silent: true });
+          await eat(bot, { silent: true, threatLevel, preferCooking: false });
           _isEating = false;
+        } else if (threatLevel === 'none') {
+          try {
+            await require('../cook').cookBestFood(bot);
+          } catch {}
         }
         _autoEatHandle = setTimeout(tick, 20000);
       } else {

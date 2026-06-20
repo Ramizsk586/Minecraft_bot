@@ -36,6 +36,26 @@ const SKILL_HANDLERS = {
     const itemName = params.itemName || params.item || '';
     return data.getRecipe(itemName);
   },
+  getBuild: async (_bot, params) => {
+    const buildName = params.buildName || params.blueprint || params.name || '';
+    return data.getBuild(buildName);
+  },
+  getCookableFood: async (_bot, params) => {
+    const itemName = params.itemName || params.item || '';
+    return data.getCookableFood(itemName);
+  },
+  getSmeltableOre: async (_bot, params) => {
+    const itemName = params.itemName || params.item || '';
+    return data.getSmeltableOre(itemName);
+  },
+  cookBestFood: async (bot) => {
+    const result = await skills.cookBestFood(bot);
+    return !!result?.success;
+  },
+  smeltBestOre: async (bot) => {
+    const result = await skills.smeltBestOre(bot);
+    return !!result?.success;
+  },
 };
 
 /**

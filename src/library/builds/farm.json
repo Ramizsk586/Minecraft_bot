@@ -1,0 +1,56 @@
+{
+  "id": "farm",
+  "name": "Crop Farm Plot",
+  "kind": "farm",
+  "description": "A compact farm border and walkway layout for wheat, carrots, potatoes, or beetroot.",
+  "footprint": { "width": 9, "depth": 9 },
+  "wallHeight": 1,
+  "totalHeight": 2,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 10,
+    "cobblestone": 0,
+    "sand": 0,
+    "coal": 0
+  },
+  "materials": {
+    "required": {
+      "oak_planks": 36
+    },
+    "optional": {
+      "water_bucket": 1,
+      "torch": 4,
+      "wheat_seeds": 16
+    }
+  },
+  "notes": [
+    "The build places the frame and walkway; the farming action finishes tilling and planting.",
+    "Best placed on flat ground."
+  ],
+  "phases": [
+    {
+      "name": "border",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 8, "y": 0, "z1": 0, "z2": 0 } },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 8, "y": 0, "z1": 8, "z2": 8 } },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 0, "y": 0, "z1": 1, "z2": 7 } },
+        { "block": "oak_planks", "rect": { "x1": 8, "x2": 8, "y": 0, "z1": 1, "z2": 7 } }
+      ]
+    },
+    {
+      "name": "walkway",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 4, "x2": 4, "y": 0, "z1": 1, "z2": 7 } }
+      ]
+    },
+    {
+      "name": "lighting",
+      "blocks": [
+        { "block": "torch", "x": 1, "y": 1, "z": 1, "optional": true },
+        { "block": "torch", "x": 7, "y": 1, "z": 1, "optional": true },
+        { "block": "torch", "x": 1, "y": 1, "z": 7, "optional": true },
+        { "block": "torch", "x": 7, "y": 1, "z": 7, "optional": true }
+      ]
+    }
+  ]
+}

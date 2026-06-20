@@ -67,6 +67,7 @@ function createBot() {
       calc: libraryCalc,
       resolveItemName,
       availableSkills: libraryFunctions.availableSkills,
+      availableBuilds: libraryData.listKnownBuilds(),
       executeSkill: (...args) => libraryFunctions.executeSkill(bot, ...args),
     };
 
@@ -143,8 +144,8 @@ Available actions:
 - {"action": "place", "block": "block_name", "x": number, "y": number, "z": number}
 - {"action": "build", "block": "block_name", "x": number, "y": number, "z": number, "width": number, "height": number, "depth": number, "type": "walls|floor|solid|shell"}
 - {"action": "fill", "block": "block_name", "x1": number, "y1": number, "z1": number, "x2": number, "y2": number, "z2": number}
-- {"action": "house_plan", "blueprint": "starter_cottage|crop_farm_plot|animal_pen|cooking_shack"}
-- {"action": "build_house", "blueprint": "starter_cottage|crop_farm_plot|animal_pen|cooking_shack", "x": number, "y": number, "z": number, "facing": "north|south|east|west"}
+- {"action": "house_plan", "blueprint": "home|farm|animal_pen|cooking_shack|storage_hut|watch_tower|ironfarm"}
+- {"action": "build_house", "blueprint": "home|farm|animal_pen|cooking_shack|storage_hut|watch_tower|ironfarm", "x": number, "y": number, "z": number, "facing": "north|south|east|west"}
 
 === MINING & WOOD ===
 - {"action": "mine", "block": "block_name", "count": number}
@@ -174,11 +175,11 @@ GUIDELINES:
 - For multi-step tasks, use "sequence" to chain actions.
 - Always pick the most logical action given the world state and inventory.
 - If the player asks to build something, calculate approximate coordinates relative to the bot's position.
-- If the player asks for a house or survival structure, prefer "build_house". The builder can gather missing core materials like logs, cobblestone, sand, and coal before construction.
+- If the player asks for a house or survival structure, prefer "build_house". The builder can gather missing core materials like logs, cobblestone, sand, coal, and some crafted parts before construction.
 - For mining, prefer the correct tool. The bot auto-equips the best tool.
 - The bot auto-eats when hungry, auto-crafts weapons before combat, and auto-equips armor.
 - If the task is impossible or you need clarification, use "chat" to explain why.
-- When building structures, use "build" with type "walls" for custom sizes, or "build_house" for built-in structures like cottage, farm plot, animal pen, and cooking shack.
+- When building structures, use "build" with type "walls" for custom sizes, or "build_house" for built-in JSON blueprints like home, farm, animal pen, cooking shack, storage hut, watch tower, and ironfarm.
 - For farming, use "create_farm" to set up new farms, "harvest" with replant for ongoing harvesting.
 - Use "house_plan" when you want to report the blueprint and materials before building.`;
 

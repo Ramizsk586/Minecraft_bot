@@ -1,0 +1,262 @@
+{
+  "raw_beef": {
+    "result": "cooked_beef",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 3,
+    "hungerGainCooked": 8,
+    "saturationCooked": 12.8,
+    "batchGoal": 8,
+    "priority": 10
+  },
+  "raw_porkchop": {
+    "result": "cooked_porkchop",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 3,
+    "hungerGainCooked": 8,
+    "saturationCooked": 12.8,
+    "batchGoal": 8,
+    "priority": 10
+  },
+  "raw_mutton": {
+    "result": "cooked_mutton",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 6,
+    "saturationCooked": 9.6,
+    "batchGoal": 8,
+    "priority": 8
+  },
+  "raw_chicken": {
+    "result": "cooked_chicken",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 6,
+    "saturationCooked": 7.2,
+    "batchGoal": 8,
+    "priority": 9
+  },
+  "raw_rabbit": {
+    "result": "cooked_rabbit",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 3,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 6,
+    "priority": 5
+  },
+  "raw_cod": {
+    "result": "cooked_cod",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 8,
+    "priority": 5
+  },
+  "raw_salmon": {
+    "result": "cooked_salmon",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 6,
+    "saturationCooked": 9.6,
+    "batchGoal": 8,
+    "priority": 7
+  },
+  "potato": {
+    "result": "baked_potato",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 1,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 10,
+    "priority": 6
+  },
+  "kelp": {
+    "result": "dried_kelp",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 0,
+    "hungerGainCooked": 1,
+    "saturationCooked": 0.6,
+    "batchGoal": 16,
+    "priority": 2
+  },
+  "carrot": {
+    "result": "cooked_carrot",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 3,
+    "hungerGainCooked": 6,
+    "saturationCooked": 7.2,
+    "batchGoal": 8,
+    "priority": 5
+  },
+  "apple": {
+    "result": "baked_apple",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 4,
+    "hungerGainCooked": 6,
+    "saturationCooked": 7.2,
+    "batchGoal": 8,
+    "priority": 5
+  },
+  "sweet_berries": {
+    "result": "cooked_sweet_berries",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 12,
+    "priority": 3
+  },
+  "beetroot": {
+    "result": "cooked_beetroot",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 1,
+    "hungerGainCooked": 3,
+    "saturationCooked": 3.6,
+    "batchGoal": 8,
+    "priority": 3
+  },
+  "egg": {
+    "result": "fried_egg",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 0,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 16,
+    "priority": 4
+  },
+  "rotten_flesh": {
+    "result": "cooked_rotten_flesh",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 4,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 8,
+    "priority": 4
+  },
+  "tropical_fish": {
+    "result": "cooked_tropical_fish",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 1,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 8,
+    "priority": 4
+  },
+  "pufferfish": {
+    "result": "cooked_pufferfish",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 1,
+    "hungerGainCooked": 3,
+    "saturationCooked": 3.6,
+    "batchGoal": 4,
+    "priority": 2
+  },
+  "spider_eye": {
+    "result": "cooked_spider_eye",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 4,
+    "priority": 2
+  },
+  "glow_berries": {
+    "result": "cooked_glow_berries",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 12,
+    "priority": 3
+  },
+  "melon_slice": {
+    "result": "roasted_melon_slice",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 16,
+    "priority": 4
+  },
+  "brown_mushroom": {
+    "result": "roasted_brown_mushroom",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 1,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 8,
+    "priority": 4
+  },
+  "red_mushroom": {
+    "result": "roasted_red_mushroom",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 1,
+    "hungerGainCooked": 4,
+    "saturationCooked": 4.8,
+    "batchGoal": 8,
+    "priority": 4
+  },
+  "pumpkin": {
+    "result": "roasted_pumpkin",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 0,
+    "hungerGainCooked": 6,
+    "saturationCooked": 7.2,
+    "batchGoal": 4,
+    "priority": 5
+  },
+  "poisonous_potato": {
+    "result": "roasted_poisonous_potato",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 2,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 8,
+    "priority": 5
+  },
+  "turtle_egg": {
+    "result": "cooked_turtle_egg",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 0,
+    "hungerGainCooked": 5,
+    "saturationCooked": 6.0,
+    "batchGoal": 8,
+    "priority": 4
+  },
+  "sniffer_egg": {
+    "result": "cooked_sniffer_egg",
+    "station": "furnace",
+    "fuelPerItem": 0.125,
+    "hungerGainRaw": 0,
+    "hungerGainCooked": 10,
+    "saturationCooked": 14.4,
+    "batchGoal": 1,
+    "priority": 8
+  }
+}

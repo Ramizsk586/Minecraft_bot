@@ -1,0 +1,57 @@
+{
+  "id": "watch_tower",
+  "name": "Watch Tower",
+  "kind": "defense",
+  "description": "A small lookout tower for scanning threats and defending the base perimeter.",
+  "footprint": { "width": 5, "depth": 5 },
+  "wallHeight": 8,
+  "totalHeight": 10,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 22,
+    "cobblestone": 16,
+    "sand": 0,
+    "coal": 0
+  },
+  "materials": {
+    "required": {
+      "oak_log": 18,
+      "oak_planks": 40,
+      "cobblestone": 16,
+      "ladder": 9
+    },
+    "optional": {
+      "torch": 4
+    }
+  },
+  "notes": [
+    "Useful as a defensive scan point near the survival base."
+  ],
+  "phases": [
+    {
+      "name": "base",
+      "blocks": [
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 4, "y": 0, "z1": 0, "z2": 4 } },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 0 }, { "block": "oak_log", "x": 0, "y": 2, "z": 0 }, { "block": "oak_log", "x": 0, "y": 3, "z": 0 }, { "block": "oak_log", "x": 0, "y": 4, "z": 0 }, { "block": "oak_log", "x": 0, "y": 5, "z": 0 }, { "block": "oak_log", "x": 0, "y": 6, "z": 0 }, { "block": "oak_log", "x": 0, "y": 7, "z": 0 }, { "block": "oak_log", "x": 0, "y": 8, "z": 0 },
+        { "block": "oak_log", "x": 4, "y": 1, "z": 0 }, { "block": "oak_log", "x": 4, "y": 2, "z": 0 }, { "block": "oak_log", "x": 4, "y": 3, "z": 0 }, { "block": "oak_log", "x": 4, "y": 4, "z": 0 }, { "block": "oak_log", "x": 4, "y": 5, "z": 0 }, { "block": "oak_log", "x": 4, "y": 6, "z": 0 }, { "block": "oak_log", "x": 4, "y": 7, "z": 0 }, { "block": "oak_log", "x": 4, "y": 8, "z": 0 },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 4 }, { "block": "oak_log", "x": 0, "y": 2, "z": 4 }, { "block": "oak_log", "x": 0, "y": 3, "z": 4 }, { "block": "oak_log", "x": 0, "y": 4, "z": 4 }, { "block": "oak_log", "x": 0, "y": 5, "z": 4 }, { "block": "oak_log", "x": 0, "y": 6, "z": 4 }, { "block": "oak_log", "x": 0, "y": 7, "z": 4 }, { "block": "oak_log", "x": 0, "y": 8, "z": 4 },
+        { "block": "oak_log", "x": 4, "y": 1, "z": 4 }, { "block": "oak_log", "x": 4, "y": 2, "z": 4 }, { "block": "oak_log", "x": 4, "y": 3, "z": 4 }, { "block": "oak_log", "x": 4, "y": 4, "z": 4 }, { "block": "oak_log", "x": 4, "y": 5, "z": 4 }, { "block": "oak_log", "x": 4, "y": 6, "z": 4 }, { "block": "oak_log", "x": 4, "y": 7, "z": 4 }, { "block": "oak_log", "x": 4, "y": 8, "z": 4 }
+      ]
+    },
+    {
+      "name": "platform",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 4, "y": 8, "z1": 0, "z2": 4 } },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 4, "y": 9, "z1": 0, "z2": 0 } },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 4, "y": 9, "z1": 4, "z2": 4 } },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 0, "y": 9, "z1": 1, "z2": 3 } },
+        { "block": "oak_planks", "rect": { "x1": 4, "x2": 4, "y": 9, "z1": 1, "z2": 3 } },
+        { "block": "ladder", "rect": { "x1": 2, "x2": 2, "y": 1, "z1": 1, "z2": 1 } },
+        { "block": "torch", "x": 0, "y": 10, "z": 0, "optional": true },
+        { "block": "torch", "x": 4, "y": 10, "z": 0, "optional": true },
+        { "block": "torch", "x": 0, "y": 10, "z": 4, "optional": true },
+        { "block": "torch", "x": 4, "y": 10, "z": 4, "optional": true }
+      ]
+    }
+  ]
+}

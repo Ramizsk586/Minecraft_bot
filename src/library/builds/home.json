@@ -1,0 +1,103 @@
+{
+  "id": "home",
+  "name": "Survival Home",
+  "kind": "house",
+  "description": "A practical early survival house with plank floor, log frame, cobblestone walls, glass windows, and basic interior utility.",
+  "footprint": { "width": 9, "depth": 7 },
+  "wallHeight": 4,
+  "totalHeight": 7,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 28,
+    "cobblestone": 72,
+    "sand": 6,
+    "coal": 2
+  },
+  "materials": {
+    "required": {
+      "oak_planks": 126,
+      "oak_log": 20,
+      "cobblestone": 72,
+      "glass_pane": 6
+    },
+    "optional": {
+      "crafting_table": 1,
+      "furnace": 1,
+      "chest": 1,
+      "torch": 4
+    }
+  },
+  "notes": [
+    "Good default shelter for the bot when it needs a safe base.",
+    "If materials are missing, the builder should gather wood, stone, sand, and coal before building.",
+    "Optional interior blocks are placed only when available."
+  ],
+  "phases": [
+    {
+      "name": "foundation_floor",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 8, "y": 0, "z1": 0, "z2": 6 } },
+        { "block": "oak_planks", "rect": { "x1": 2, "x2": 6, "y": 0, "z1": -1, "z2": -1 } }
+      ]
+    },
+    {
+      "name": "frame",
+      "blocks": [
+        { "block": "oak_log", "x": 0, "y": 1, "z": 0 }, { "block": "oak_log", "x": 0, "y": 2, "z": 0 }, { "block": "oak_log", "x": 0, "y": 3, "z": 0 }, { "block": "oak_log", "x": 0, "y": 4, "z": 0 },
+        { "block": "oak_log", "x": 8, "y": 1, "z": 0 }, { "block": "oak_log", "x": 8, "y": 2, "z": 0 }, { "block": "oak_log", "x": 8, "y": 3, "z": 0 }, { "block": "oak_log", "x": 8, "y": 4, "z": 0 },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 6 }, { "block": "oak_log", "x": 0, "y": 2, "z": 6 }, { "block": "oak_log", "x": 0, "y": 3, "z": 6 }, { "block": "oak_log", "x": 0, "y": 4, "z": 6 },
+        { "block": "oak_log", "x": 8, "y": 1, "z": 6 }, { "block": "oak_log", "x": 8, "y": 2, "z": 6 }, { "block": "oak_log", "x": 8, "y": 3, "z": 6 }, { "block": "oak_log", "x": 8, "y": 4, "z": 6 },
+        { "block": "oak_log", "x": 3, "y": 1, "z": 0 }, { "block": "oak_log", "x": 3, "y": 2, "z": 0 },
+        { "block": "oak_log", "x": 5, "y": 1, "z": 0 }, { "block": "oak_log", "x": 5, "y": 2, "z": 0 }
+      ]
+    },
+    {
+      "name": "walls",
+      "blocks": [
+        { "block": "cobblestone", "x": 1, "y": 1, "z": 0 }, { "block": "cobblestone", "x": 2, "y": 1, "z": 0 }, { "block": "cobblestone", "x": 6, "y": 1, "z": 0 }, { "block": "cobblestone", "x": 7, "y": 1, "z": 0 },
+        { "block": "cobblestone", "x": 1, "y": 2, "z": 0 }, { "block": "cobblestone", "x": 2, "y": 2, "z": 0 }, { "block": "cobblestone", "x": 6, "y": 2, "z": 0 }, { "block": "cobblestone", "x": 7, "y": 2, "z": 0 },
+        { "block": "oak_log", "x": 4, "y": 3, "z": 0 }, { "block": "oak_log", "x": 4, "y": 4, "z": 0 },
+
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 0, "y": 1, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 8, "x2": 8, "y": 1, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 0, "y": 3, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 8, "x2": 8, "y": 3, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 7, "y": 1, "z1": 6, "z2": 6 } },
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 2, "y": 2, "z1": 6, "z2": 6 } },
+        { "block": "cobblestone", "rect": { "x1": 6, "x2": 7, "y": 2, "z1": 6, "z2": 6 } },
+        { "block": "oak_log", "x": 3, "y": 3, "z": 6 }, { "block": "oak_log", "x": 4, "y": 3, "z": 6 }, { "block": "oak_log", "x": 5, "y": 3, "z": 6 },
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 0, "y": 4, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 8, "x2": 8, "y": 4, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 7, "y": 4, "z1": 6, "z2": 6 } }
+      ]
+    },
+    {
+      "name": "windows",
+      "blocks": [
+        { "block": "glass_pane", "x": 0, "y": 2, "z": 2 }, { "block": "glass_pane", "x": 0, "y": 2, "z": 4 },
+        { "block": "glass_pane", "x": 8, "y": 2, "z": 2 }, { "block": "glass_pane", "x": 8, "y": 2, "z": 4 },
+        { "block": "glass_pane", "x": 3, "y": 2, "z": 6 }, { "block": "glass_pane", "x": 5, "y": 2, "z": 6 }
+      ]
+    },
+    {
+      "name": "roof",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 8, "y": 5, "z1": 0, "z2": 6 } },
+        { "block": "oak_planks", "rect": { "x1": 1, "x2": 7, "y": 6, "z1": 1, "z2": 5 } },
+        { "block": "oak_planks", "rect": { "x1": 2, "x2": 6, "y": 7, "z1": 2, "z2": 4 } }
+      ]
+    },
+    {
+      "name": "interior",
+      "blocks": [
+        { "block": "crafting_table", "x": 1, "y": 1, "z": 1, "optional": true },
+        { "block": "furnace", "x": 2, "y": 1, "z": 1, "optional": true },
+        { "block": "chest", "x": 7, "y": 1, "z": 1, "optional": true },
+        { "block": "torch", "x": 2, "y": 3, "z": 2, "optional": true },
+        { "block": "torch", "x": 6, "y": 3, "z": 2, "optional": true },
+        { "block": "torch", "x": 2, "y": 3, "z": 5, "optional": true },
+        { "block": "torch", "x": 6, "y": 3, "z": 5, "optional": true }
+      ]
+    }
+  ]
+}

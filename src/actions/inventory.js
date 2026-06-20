@@ -296,7 +296,8 @@ function register(bot, goals) {
       const armorNames = ['helmet', 'chestplate', 'leggings', 'boots', 'shield'];
       const foodNames = ['bread', 'cooked', 'apple', 'steak', 'porkchop', 'chicken', 'mutton', 'rabbit',
         'cod', 'salmon', 'potato', 'carrot', 'beetroot', 'melon_slice', 'sweet_berries',
-        'golden_apple', 'cake', 'cookie', 'pumpkin_pie', 'mushroom_stew', 'dried_kelp'];
+        'golden_apple', 'cake', 'cookie', 'pumpkin_pie', 'mushroom_stew', 'dried_kelp',
+        'egg', 'fish', 'pufferfish', 'spider_eye', 'rotten_flesh', 'pumpkin', 'mushroom', 'berries'];
 
       // Re-read inventory after consolidation
       const updatedItems = bot.inventory.items();

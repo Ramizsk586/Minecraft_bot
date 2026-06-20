@@ -1,0 +1,68 @@
+{
+  "id": "storage_hut",
+  "name": "Storage Hut",
+  "kind": "storage",
+  "description": "A compact storage-focused shelter with reinforced walls and chest space.",
+  "footprint": { "width": 7, "depth": 7 },
+  "wallHeight": 4,
+  "totalHeight": 6,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 18,
+    "cobblestone": 40,
+    "sand": 4,
+    "coal": 2
+  },
+  "materials": {
+    "required": {
+      "oak_planks": 68,
+      "oak_log": 12,
+      "cobblestone": 40,
+      "glass_pane": 4
+    },
+    "optional": {
+      "chest": 4,
+      "torch": 4,
+      "crafting_table": 1
+    }
+  },
+  "notes": [
+    "Useful once the bot starts collecting larger amounts of survival resources."
+  ],
+  "phases": [
+    {
+      "name": "shell",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 6, "y": 0, "z1": 0, "z2": 6 } },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 0 }, { "block": "oak_log", "x": 0, "y": 2, "z": 0 }, { "block": "oak_log", "x": 0, "y": 3, "z": 0 }, { "block": "oak_log", "x": 0, "y": 4, "z": 0 },
+        { "block": "oak_log", "x": 6, "y": 1, "z": 0 }, { "block": "oak_log", "x": 6, "y": 2, "z": 0 }, { "block": "oak_log", "x": 6, "y": 3, "z": 0 }, { "block": "oak_log", "x": 6, "y": 4, "z": 0 },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 6 }, { "block": "oak_log", "x": 0, "y": 2, "z": 6 }, { "block": "oak_log", "x": 0, "y": 3, "z": 6 }, { "block": "oak_log", "x": 0, "y": 4, "z": 6 },
+        { "block": "oak_log", "x": 6, "y": 1, "z": 6 }, { "block": "oak_log", "x": 6, "y": 2, "z": 6 }, { "block": "oak_log", "x": 6, "y": 3, "z": 6 }, { "block": "oak_log", "x": 6, "y": 4, "z": 6 },
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 6, "y": 1, "z1": 0, "z2": 0 } },
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 6, "y": 1, "z1": 6, "z2": 6 } },
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 0, "y": 1, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 6, "x2": 6, "y": 1, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 0, "y": 2, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 6, "x2": 6, "y": 2, "z1": 1, "z2": 5 } },
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 5, "y": 2, "z1": 6, "z2": 6 } },
+        { "block": "glass_pane", "x": 0, "y": 2, "z": 3 }, { "block": "glass_pane", "x": 6, "y": 2, "z": 3 },
+        { "block": "glass_pane", "x": 2, "y": 2, "z": 6 }, { "block": "glass_pane", "x": 4, "y": 2, "z": 6 },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 6, "y": 5, "z1": 0, "z2": 6 } }
+      ]
+    },
+    {
+      "name": "interior",
+      "blocks": [
+        { "block": "chest", "x": 1, "y": 1, "z": 5, "optional": true },
+        { "block": "chest", "x": 2, "y": 1, "z": 5, "optional": true },
+        { "block": "chest", "x": 4, "y": 1, "z": 5, "optional": true },
+        { "block": "chest", "x": 5, "y": 1, "z": 5, "optional": true },
+        { "block": "crafting_table", "x": 1, "y": 1, "z": 1, "optional": true },
+        { "block": "torch", "x": 1, "y": 3, "z": 1, "optional": true },
+        { "block": "torch", "x": 5, "y": 3, "z": 1, "optional": true },
+        { "block": "torch", "x": 1, "y": 3, "z": 5, "optional": true },
+        { "block": "torch", "x": 5, "y": 3, "z": 5, "optional": true }
+      ]
+    }
+  ]
+}

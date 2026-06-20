@@ -1,0 +1,68 @@
+{
+  "id": "cooking_shack",
+  "name": "Cooking Shack",
+  "kind": "cooking",
+  "description": "A compact covered kitchen for furnaces, crafting, and food prep.",
+  "footprint": { "width": 7, "depth": 5 },
+  "wallHeight": 3,
+  "totalHeight": 5,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 14,
+    "cobblestone": 24,
+    "sand": 0,
+    "coal": 0
+  },
+  "materials": {
+    "required": {
+      "oak_planks": 42,
+      "oak_log": 8,
+      "cobblestone": 24
+    },
+    "optional": {
+      "furnace": 2,
+      "chest": 1,
+      "torch": 2,
+      "crafting_table": 1
+    }
+  },
+  "notes": [
+    "Good support build for smelting and cooking loops."
+  ],
+  "phases": [
+    {
+      "name": "floor",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 6, "y": 0, "z1": 0, "z2": 4 } }
+      ]
+    },
+    {
+      "name": "frame",
+      "blocks": [
+        { "block": "oak_log", "x": 0, "y": 1, "z": 0 }, { "block": "oak_log", "x": 0, "y": 2, "z": 0 },
+        { "block": "oak_log", "x": 6, "y": 1, "z": 0 }, { "block": "oak_log", "x": 6, "y": 2, "z": 0 },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 4 }, { "block": "oak_log", "x": 0, "y": 2, "z": 4 },
+        { "block": "oak_log", "x": 6, "y": 1, "z": 4 }, { "block": "oak_log", "x": 6, "y": 2, "z": 4 }
+      ]
+    },
+    {
+      "name": "back_wall_and_roof",
+      "blocks": [
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 5, "y": 1, "z1": 4, "z2": 4 } },
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 5, "y": 2, "z1": 4, "z2": 4 } },
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 6, "y": 3, "z1": 0, "z2": 4 } }
+      ]
+    },
+    {
+      "name": "kitchen",
+      "blocks": [
+        { "block": "furnace", "x": 1, "y": 1, "z": 3, "optional": true },
+        { "block": "furnace", "x": 2, "y": 1, "z": 3, "optional": true },
+        { "block": "crafting_table", "x": 4, "y": 1, "z": 3, "optional": true },
+        { "block": "chest", "x": 5, "y": 1, "z": 3, "optional": true },
+        { "block": "torch", "x": 1, "y": 2, "z": 1, "optional": true },
+        { "block": "torch", "x": 5, "y": 2, "z": 1, "optional": true }
+      ]
+    }
+  ]
+}

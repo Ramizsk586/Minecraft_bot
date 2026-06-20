@@ -84,16 +84,23 @@ function findBestTool(bot, blockName) {
 // ─── Food Priority ────────────────────────────────────────────────────────────
 
 const FOOD_PRIORITY = [
-  'enchanted_golden_apple', 'golden_apple', 'golden_carrot',
+  'enchanted_golden_apple', 'golden_apple', 'golden_carrot', 'cooked_sniffer_egg',
   'cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_salmon',
   'cooked_cod', 'cooked_chicken', 'cooked_rabbit',
+  'cooked_carrot', 'baked_apple', 'cooked_rotten_flesh',
+  'roasted_pumpkin', 'roasted_poisonous_potato', 'cooked_turtle_egg',
+  'roasted_brown_mushroom', 'roasted_red_mushroom',
   'bread', 'baked_potato', 'beetroot_soup', 'mushroom_stew',
   'pumpkin_pie', 'cake', 'cookie', 'melon_slice',
+  'fried_egg', 'cooked_sweet_berries', 'cooked_tropical_fish',
+  'cooked_spider_eye', 'cooked_beetroot', 'cooked_pufferfish',
+  'cooked_glow_berries', 'roasted_melon_slice',
   'sweet_berries', 'apple', 'carrot', 'potato',
   'dried_kelp', 'beetroot',
   'raw_beef', 'raw_porkchop', 'raw_mutton', 'raw_chicken',
-  'raw_cod', 'raw_salmon', 'raw_rabbit',
-  'rotten_flesh', 'spider_eye',
+  'raw_cod', 'raw_salmon', 'raw_rabbit', 'tropical_fish',
+  'rotten_flesh', 'spider_eye', 'egg', 'turtle_egg', 'sniffer_egg',
+  'brown_mushroom', 'red_mushroom', 'pumpkin',
 ];
 
 /**

@@ -1,0 +1,76 @@
+{
+  "id": "animal_pen",
+  "name": "Animal Pen",
+  "kind": "breeding",
+  "description": "A fenced animal breeding pen with a gate and a small covered corner.",
+  "footprint": { "width": 9, "depth": 9 },
+  "wallHeight": 2,
+  "totalHeight": 4,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 20,
+    "cobblestone": 12,
+    "sand": 0,
+    "coal": 0
+  },
+  "materials": {
+    "required": {
+      "oak_fence": 24,
+      "oak_planks": 28,
+      "cobblestone": 12
+    },
+    "optional": {
+      "oak_fence_gate": 1,
+      "torch": 4,
+      "chest": 1
+    }
+  },
+  "notes": [
+    "Use wheat, seeds, carrots, or beetroot to lure animals in after construction."
+  ],
+  "phases": [
+    {
+      "name": "floor_ring",
+      "blocks": [
+        { "block": "oak_planks", "rect": { "x1": 0, "x2": 8, "y": 0, "z1": 0, "z2": 8 } }
+      ]
+    },
+    {
+      "name": "posts",
+      "blocks": [
+        { "block": "oak_log", "x": 0, "y": 1, "z": 0 }, { "block": "oak_log", "x": 0, "y": 2, "z": 0 },
+        { "block": "oak_log", "x": 8, "y": 1, "z": 0 }, { "block": "oak_log", "x": 8, "y": 2, "z": 0 },
+        { "block": "oak_log", "x": 0, "y": 1, "z": 8 }, { "block": "oak_log", "x": 0, "y": 2, "z": 8 },
+        { "block": "oak_log", "x": 8, "y": 1, "z": 8 }, { "block": "oak_log", "x": 8, "y": 2, "z": 8 }
+      ]
+    },
+    {
+      "name": "fence_wall",
+      "blocks": [
+        { "block": "oak_fence", "rect": { "x1": 1, "x2": 3, "y": 1, "z1": 0, "z2": 0 } },
+        { "block": "oak_fence", "rect": { "x1": 5, "x2": 7, "y": 1, "z1": 0, "z2": 0 } },
+        { "block": "oak_fence", "rect": { "x1": 1, "x2": 7, "y": 1, "z1": 8, "z2": 8 } },
+        { "block": "oak_fence", "rect": { "x1": 0, "x2": 0, "y": 1, "z1": 1, "z2": 7 } },
+        { "block": "oak_fence", "rect": { "x1": 8, "x2": 8, "y": 1, "z1": 1, "z2": 7 } }
+      ]
+    },
+    {
+      "name": "gate_and_shelter",
+      "blocks": [
+        { "block": "oak_fence_gate", "x": 4, "y": 1, "z": 0, "optional": true },
+        { "block": "cobblestone", "rect": { "x1": 1, "x2": 3, "y": 1, "z1": 6, "z2": 8 } },
+        { "block": "oak_planks", "rect": { "x1": 1, "x2": 3, "y": 3, "z1": 6, "z2": 8 } },
+        { "block": "chest", "x": 2, "y": 1, "z": 7, "optional": true }
+      ]
+    },
+    {
+      "name": "lighting",
+      "blocks": [
+        { "block": "torch", "x": 1, "y": 2, "z": 1, "optional": true },
+        { "block": "torch", "x": 7, "y": 2, "z": 1, "optional": true },
+        { "block": "torch", "x": 1, "y": 2, "z": 7, "optional": true },
+        { "block": "torch", "x": 7, "y": 2, "z": 7, "optional": true }
+      ]
+    }
+  ]
+}

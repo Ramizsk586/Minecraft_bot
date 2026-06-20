@@ -1,0 +1,73 @@
+{
+  "id": "ironfarm",
+  "name": "Early Iron Farm Frame",
+  "kind": "utility",
+  "description": "A starter iron farm structure frame with work platform, villager bay, zombie lane, and collection chamber. The bot can build the structure, but villagers and mob transport still need world setup.",
+  "footprint": { "width": 11, "depth": 11 },
+  "wallHeight": 6,
+  "totalHeight": 9,
+  "recommendedFacing": "south",
+  "gatherPlan": {
+    "logs": 20,
+    "cobblestone": 96,
+    "sand": 0,
+    "coal": 0
+  },
+  "materials": {
+    "required": {
+      "cobblestone": 96,
+      "oak_planks": 48,
+      "oak_fence": 12,
+      "water_bucket": 2,
+      "lava_bucket": 1
+    },
+    "optional": {
+      "bed": 3,
+      "crafting_table": 1,
+      "chest": 2,
+      "hopper": 4,
+      "torch": 4
+    }
+  },
+  "notes": [
+    "This is a structured frame blueprint, not a full villager transport automation.",
+    "Use it after the bot has a stable base and can gather serious materials."
+  ],
+  "phases": [
+    {
+      "name": "base_platform",
+      "blocks": [
+        { "block": "cobblestone", "rect": { "x1": 0, "x2": 10, "y": 0, "z1": 0, "z2": 10 } },
+        { "block": "cobblestone", "rect": { "x1": 2, "x2": 8, "y": 1, "z1": 2, "z2": 8 } }
+      ]
+    },
+    {
+      "name": "walls_and_channels",
+      "blocks": [
+        { "block": "cobblestone", "rect": { "x1": 2, "x2": 8, "y": 2, "z1": 2, "z2": 2 } },
+        { "block": "cobblestone", "rect": { "x1": 2, "x2": 8, "y": 2, "z1": 8, "z2": 8 } },
+        { "block": "cobblestone", "rect": { "x1": 2, "x2": 2, "y": 2, "z1": 3, "z2": 7 } },
+        { "block": "cobblestone", "rect": { "x1": 8, "x2": 8, "y": 2, "z1": 3, "z2": 7 } },
+        { "block": "oak_planks", "rect": { "x1": 3, "x2": 7, "y": 2, "z1": 4, "z2": 6 } },
+        { "block": "oak_fence", "rect": { "x1": 3, "x2": 7, "y": 3, "z1": 3, "z2": 3 } },
+        { "block": "oak_fence", "rect": { "x1": 3, "x2": 7, "y": 3, "z1": 7, "z2": 7 } }
+      ]
+    },
+    {
+      "name": "collection_and_support",
+      "blocks": [
+        { "block": "chest", "x": 4, "y": 1, "z": 0, "optional": true },
+        { "block": "chest", "x": 5, "y": 1, "z": 0, "optional": true },
+        { "block": "hopper", "x": 4, "y": 2, "z": 1, "optional": true },
+        { "block": "hopper", "x": 5, "y": 2, "z": 1, "optional": true },
+        { "block": "bed", "x": 3, "y": 2, "z": 5, "optional": true },
+        { "block": "bed", "x": 5, "y": 2, "z": 5, "optional": true },
+        { "block": "bed", "x": 7, "y": 2, "z": 5, "optional": true },
+        { "block": "torch", "x": 2, "y": 4, "z": 2, "optional": true },
+        { "block": "torch", "x": 8, "y": 4, "z": 2, "optional": true },
+        { "block": "torch", "x": 2, "y": 4, "z": 8, "optional": true },
+        { "block": "torch", "x": 8, "y": 4, "z": 8, "optional": true }
+      ]
+    }
+  ]
+}

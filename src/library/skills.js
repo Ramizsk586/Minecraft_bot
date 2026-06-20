@@ -5,6 +5,7 @@
 const craftBrain = require('../brain/craft');
 const eatBrain = require('../brain/eat');
 const data = require('./data');
+const cookController = require('../cook');
 
 /**
  * Gather wood logs by chopping trees.
@@ -46,6 +47,26 @@ function getMobInfo(mobName) {
   return data.getMobInfo(mobName);
 }
 
+function getBuild(buildName) {
+  return data.getBuild(buildName);
+}
+
+function getCookableFood(itemName) {
+  return data.getCookableFood(itemName);
+}
+
+function getSmeltableOre(itemName) {
+  return data.getSmeltableOre(itemName);
+}
+
+async function cookBestFood(bot) {
+  return cookController.cookBestFood(bot);
+}
+
+async function smeltBestOre(bot) {
+  return cookController.smeltBestOre(bot);
+}
+
 module.exports = {
   gatherLogs,
   mineBlock,
@@ -54,4 +75,9 @@ module.exports = {
   getRecipe,
   getBlockDrop,
   getMobInfo,
+  getBuild,
+  getCookableFood,
+  getSmeltableOre,
+  cookBestFood,
+  smeltBestOre,
 };
