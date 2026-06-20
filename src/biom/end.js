@@ -32,6 +32,32 @@ module.exports = {
 
   usefulItems: ['ender_pearl', 'golden_apple', 'chorus_fruit', 'slow_falling_potion'],
 
+  hazards: ['bed_explosion', 'void', 'enderman', 'ender_dragon', 'no_native_wood', 'no_water'],
+
+  resourceTargets: {
+    immediate: ['safe_platform', 'chorus_fruit', 'end_stone'],
+    tools: ['end_stone', 'obsidian'],
+    food: ['chorus_fruit', 'stored_food'],
+    safety: ['pumpkin_helmet', 'ender_pearl', 'slow_falling_potion', 'end_stone'],
+  },
+
+  relocation: {
+    enabled: true,
+    trigger: 'near_void_or_no_safe_platform',
+    searchFor: ['safe_island_center', 'gateway', 'end_city'],
+    maxLocalSearchRadius: 32,
+    travelRadius: 128,
+  },
+
+  survivalPriorities: [
+    { action: 'avoid', target: 'bed_use', urgency: 100, reason: 'beds explode in The End' },
+    { action: 'avoid', target: 'void_edges', urgency: 100, reason: 'falling into void loses everything' },
+    { action: 'build', target: 'end_stone_safety_box', urgency: 86, reason: 'safe from endermen line-of-sight' },
+    { action: 'find_food', target: 'chorus_fruit', urgency: 74, reason: 'native emergency food and escape teleport' },
+    { action: 'avoid', target: 'enderman_eye_contact', urgency: 72, reason: 'endermen swarm can overwhelm weak gear' },
+    { action: 'relocate', target: 'safe_island_center', urgency: 68, reason: 'avoid bridging until geared' },
+  ],
+
   survivalSteps: [
     '⚠️ DO NOT place or sleep in a bed — beds EXPLODE in The End!',
     'Stay away from the void — falling is instant death',

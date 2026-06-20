@@ -20,6 +20,25 @@ const TIER_LEVELS = {
 // Tiers ordered from best to worst (for upgrade checks)
 const TIER_ORDER = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden'];
 
+const NEVER_HARVEST_BLOCKS = new Set([
+  'air', 'cave_air', 'void_air', 'water', 'lava',
+  'bedrock', 'barrier', 'command_block', 'chain_command_block', 'repeating_command_block',
+  'end_portal', 'end_portal_frame', 'nether_portal', 'structure_block', 'jigsaw',
+]);
+
+const SILK_TOUCH_REQUIRED_BLOCKS = new Set([
+  'glass', 'glass_pane', 'tinted_glass',
+  'ice', 'packed_ice', 'blue_ice', 'frosted_ice',
+  'grass_block', 'mycelium', 'podzol',
+  'bookshelf', 'ender_chest',
+]);
+
+const SHEARS_REQUIRED_BLOCKS = new Set([
+  'vine', 'glow_lichen', 'cobweb',
+  'oak_leaves', 'spruce_leaves', 'birch_leaves', 'jungle_leaves',
+  'acacia_leaves', 'dark_oak_leaves', 'mangrove_leaves', 'cherry_leaves',
+]);
+
 // ─── Block → Required Tool + Minimum Tier ───────────────────────────────────
 // If a block is NOT in this table, it can be mined by anything (dirt, wood, etc.)
 // Format: { tool: 'pickaxe'|'axe'|'shovel'|'hoe'|'shears', minTier: 'wooden'|'stone'|'iron'|'diamond' }
@@ -188,6 +207,30 @@ function getTierLevel(tier) {
  * @returns {{ canMine: boolean, willDrop: boolean, reason: string }}
  */
 function checkToolForBlock(toolItem, blockName) {
+  if (NEVER_HARVEST_BLOCKS.has(blockName)) {
+    return {
+      canMine: false,
+      willDrop: false,
+      reason: `${blockName} should not be mined`,
+    };
+  }
+
+  if (SILK_TOUCH_REQUIRED_BLOCKS.has(blockName)) {
+    return {
+      canMine: true,
+      willDrop: false,
+      reason: `${blockName} needs Silk Touch to drop itself`,
+    };
+  }
+
+  if (SHEARS_REQUIRED_BLOCKS.has(blockName) && toolItem?.name !== 'shears') {
+    return {
+      canMine: true,
+      willDrop: false,
+      reason: `${blockName} needs shears to drop safely`,
+    };
+  }
+
   const req = BLOCK_TOOL_REQUIREMENTS[blockName];
 
   // No requirement → can mine with anything and items will drop
@@ -303,6 +346,9 @@ function getNeededToolCraft(bot, blockName, currentTool) {
 module.exports = {
   TIER_LEVELS,
   TIER_ORDER,
+  NEVER_HARVEST_BLOCKS,
+  SILK_TOUCH_REQUIRED_BLOCKS,
+  SHEARS_REQUIRED_BLOCKS,
   BLOCK_TOOL_REQUIREMENTS,
   getBlockRequirement,
   getTierLevel,

@@ -38,6 +38,32 @@ module.exports = {
   // Items that are useful specifically in this biome
   usefulItems: ['water_bucket', 'cactus', 'sand', 'bone'],
 
+  hazards: ['husk', 'low_wood', 'low_water', 'falling_sand', 'heat_exposure'],
+
+  resourceTargets: {
+    immediate: ['acacia_log', 'oak_log', 'village', 'water'],
+    tools: ['sandstone', 'stone', 'cobblestone'],
+    food: ['rabbit', 'cow', 'wheat', 'hay_block'],
+    safety: ['sandstone', 'water_bucket', 'torch'],
+  },
+
+  relocation: {
+    enabled: true,
+    trigger: 'no_logs_or_water_nearby',
+    searchFor: ['savanna', 'forest', 'plains', 'village', 'river'],
+    maxLocalSearchRadius: 64,
+    travelRadius: 192,
+  },
+
+  survivalPriorities: [
+    { action: 'find_wood', target: 'acacia_log', urgency: 100, reason: 'desert starts often lack nearby trees' },
+    { action: 'relocate', target: 'savanna_or_village', urgency: 92, reason: 'move if no trees or water are close' },
+    { action: 'craft', target: 'wooden_pickaxe', urgency: 86, reason: 'unlock safe sandstone and stone mining' },
+    { action: 'mine', target: 'sandstone', urgency: 72, reason: 'stable shelter block that does not fall' },
+    { action: 'find_food', target: 'village_or_animals', urgency: 68, reason: 'desert has sparse passive mobs' },
+    { action: 'secure_water', target: 'water_bucket', urgency: 60, reason: 'prevents travel and combat deaths' },
+  ],
+
   // Step-by-step survival priorities for this biome
   survivalSteps: [
     'Find and chop an acacia_log or oak_log (acacia preferred — more common in savanna)',

@@ -35,6 +35,32 @@ module.exports = {
 
   usefulItems: ['torch', 'lantern', 'iron_pickaxe', 'shield'],
 
+  hazards: ['darkness', 'warden', 'cave_spider', 'lava', 'fall_damage', 'no_native_wood'],
+
+  resourceTargets: {
+    immediate: ['surface_route', 'torch', 'coal_ore', 'iron_ore'],
+    tools: ['cobblestone', 'stone', 'deepslate'],
+    food: ['surface_animals', 'bread', 'glow_berries'],
+    safety: ['torch', 'shield', 'cobblestone', 'water_bucket'],
+  },
+
+  relocation: {
+    enabled: true,
+    trigger: 'no_wood_or_low_light',
+    searchFor: ['surface', 'forest', 'plains', 'village'],
+    maxLocalSearchRadius: 40,
+    travelRadius: 128,
+  },
+
+  survivalPriorities: [
+    { action: 'light_area', target: 'torch', urgency: 100, reason: 'dark caves spawn mobs fast' },
+    { action: 'relocate', target: 'surface_if_no_wood', urgency: 92, reason: 'wood is required before deeper mining' },
+    { action: 'mine', target: 'coal_ore', urgency: 84, reason: 'torches are survival gear underground' },
+    { action: 'mine', target: 'iron_ore', urgency: 78, reason: 'shield and armor before deep cave fights' },
+    { action: 'avoid', target: 'deep_dark', urgency: 76, reason: 'warden is not an early survival target' },
+    { action: 'mark_route', target: 'torch_trail', urgency: 52, reason: 'prevents getting lost after mining' },
+  ],
+
   survivalSteps: [
     'Place torches immediately — darkness causes mob spawns near you',
     'Priority: surface first if no tools, then return to cave',

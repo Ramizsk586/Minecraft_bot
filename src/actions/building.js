@@ -602,20 +602,15 @@ function register(bot, goals) {
             }
           }
 
-          // Equip best tool for the block
           try {
-            const { findBestTool } = require('../utils');
-            const tool = findBestTool(bot, block.name);
-            if (tool) {
-              await bot.equip(tool, 'hand');
+            const { digSafely } = require('../utils');
+            const result = await digSafely(bot, block, { requireDrops: true });
+            if (result.success) {
+              mined++;
+            } else {
+              console.log(`clear: skipped unsafe mine for ${block.name} at ${x},${y},${z}: ${result.reason}`);
+              failed++;
             }
-          } catch {
-            // No tool helper or can't equip — mine with hand
-          }
-
-          try {
-            await bot.dig(block);
-            mined++;
             await sleep(100);
           } catch (err) {
             console.log(`clear: failed to mine ${block.name} at ${x},${y},${z}: ${err.message}`);

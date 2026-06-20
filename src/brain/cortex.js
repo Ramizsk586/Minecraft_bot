@@ -25,6 +25,9 @@ const biom           = require('../biom/index');  // biome-specific survival pla
 
 const world  = require('../library/world');
 const skills = require('../library/skills');
+const { goals } = require('mineflayer-pathfinder');
+const { digSafely } = require('../utils');
+const { collectDrops } = require('../utils');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -44,6 +47,30 @@ const PRIORITIES = {
   swim:           90,
   stuck_recovery: 100,
 };
+
+const ACTION_COOLDOWNS = {
+  collect_dropped_items: 15000,
+  death_recovery: 10000,
+  reach_shore: 6000,
+  night_safety: 12000,
+  gather_resources: 12000,
+  relocate_biome: 20000,
+  craft_tools: 8000,
+  upgrade_tools: 12000,
+  craft_armor: 20000,
+  craft_shield: 30000,
+  starter_build: 60000,
+  cook_food: 20000,
+  farm: 30000,
+  ai_supervisor: 45000,
+  craft_bread: 20000,
+  equip_torch_night: 20000,
+  equip_armor: 10000,
+  idle: 2500,
+};
+
+const ACTION_FAILURE_BACKOFF_MS = 15000;
+const MAX_ACTION_FAILURES = 3;
 
 // Dynamic tick intervals based on survival score
 const TICK_SPEEDS = [
@@ -95,6 +122,8 @@ const _state = {
   persistentGoal:   null,
   persistentSince:  0,
   announcements:    {},     // cooldown map for chat messages
+  actionCooldowns:   {},
+  actionFailures:    {},
   shelterPos:       null,
   furnacePos:       null,
   smeltingActive:   false,
@@ -103,16 +132,244 @@ const _state = {
   surviveActive:    false,  // whether autonomous mode is engaged
 };
 
+const DEATH_RECOVERY_MAX_DISTANCE = 96;
+const DEATH_RECOVERY_EXPIRY_MS = 180000;
+
 // ─── Logging ─────────────────────────────────────────────────────────────────
 
 function log(msg)  { console.log(`[Cortex] ${msg}`); }
 function warn(msg) { console.warn(`[Cortex] ⚠ ${msg}`); }
 
 function announce(key, message, cooldownMs = 12000) {
+  if (!message) return false;
   const now = Date.now();
   if (now - (_state.announcements[key] || 0) < cooldownMs) return false;
+  if (_state.lastAnnouncedMessage === message && now - (_state.lastAnnouncedAt || 0) < cooldownMs) return false;
   _state.announcements[key] = now;
+  _state.lastAnnouncedMessage = message;
+  _state.lastAnnouncedAt = now;
   _bot.chat(message);
+  return true;
+}
+
+function snapshotInventory(bot) {
+  return bot.inventory.items().map(item => ({
+    name: item.name,
+    count: item.count,
+  }));
+}
+
+function scoreRecoveryItem(bot, entry) {
+  const name = entry.name;
+  const count = entry.count || 1;
+
+  if (/_pickaxe$|_axe$|_sword$|_shovel$|_hoe$/.test(name)) return 20;
+  if (/_helmet$|_chestplate$|_leggings$|_boots$/.test(name)) return 16;
+  if (['shield', 'crafting_table', 'furnace', 'water_bucket', 'bucket'].includes(name) || name.endsWith('_bed')) return 12;
+  if (['bread', 'cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_cod', 'cooked_salmon'].includes(name)) return bot.food < 14 ? count * 3 : count;
+  if (['iron_ingot', 'raw_iron', 'coal', 'diamond', 'gold_ingot', 'torch'].includes(name)) return count;
+  return 0;
+}
+
+function shouldAttemptDeathRecovery(bot, recovery) {
+  if (!recovery || recovery.done) return false;
+  if (Date.now() - recovery.createdAt > DEATH_RECOVERY_EXPIRY_MS) return false;
+  if (bot.entity.position.distanceTo(recovery.position) > DEATH_RECOVERY_MAX_DISTANCE) return false;
+
+  const totalScore = recovery.lostItems.reduce((sum, entry) => sum + scoreRecoveryItem(bot, entry), 0);
+  const essentialLost = recovery.lostItems.some(entry =>
+    /_pickaxe$|_axe$|_sword$|_helmet$|_chestplate$|_leggings$|_boots$/.test(entry.name) ||
+    ['shield', 'crafting_table', 'furnace'].includes(entry.name)
+  );
+
+  return essentialLost || totalScore >= 16;
+}
+
+function hasStarterBuildMaterials() {
+  const planks = craftBrain.countAnyOf(_bot, craftBrain.PLANK_TYPES);
+  const logs = craftBrain.countAnyOf(_bot, craftBrain.LOG_TYPES);
+  const cobble = craftBrain.countItem(_bot, 'cobblestone') + craftBrain.countItem(_bot, 'stone') + craftBrain.countItem(_bot, 'sandstone');
+  const torches = craftBrain.countItem(_bot, 'torch');
+  const table = craftBrain.countItem(_bot, 'crafting_table');
+  const furnace = craftBrain.countItem(_bot, 'furnace');
+
+  return {
+    ready: (planks >= 48 && logs >= 8 && cobble >= 24) || (planks >= 64 && cobble >= 16),
+    planks,
+    logs,
+    cobble,
+    torches,
+    table,
+    furnace,
+  };
+}
+
+function getArmorManagementState() {
+  const armorTypes = ['helmet', 'chestplate', 'leggings', 'boots'];
+  const slotMap = { helmet: 5, chestplate: 6, leggings: 7, boots: 8 };
+  const tierScore = { leather: 1, golden: 2, chainmail: 3, iron: 4, diamond: 5, netherite: 6 };
+
+  let missingPieces = 0;
+  let upgradeAvailable = false;
+  let equippedScore = 0;
+
+  for (const type of armorTypes) {
+    const equipped = _bot.inventory.slots[slotMap[type]];
+    const equippedTier = equipped ? (Object.keys(tierScore).find(t => equipped.name.startsWith(`${t}_`)) || '') : '';
+    const equippedPieceScore = tierScore[equippedTier] || 0;
+    equippedScore += equippedPieceScore;
+    if (!equipped) missingPieces++;
+
+    const betterOwned = _bot.inventory.items().some(item => {
+      if (!item.name.endsWith(`_${type}`)) return false;
+      const itemTier = Object.keys(tierScore).find(t => item.name.startsWith(`${t}_`)) || '';
+      return (tierScore[itemTier] || 0) > equippedPieceScore;
+    });
+    if (betterOwned) upgradeAvailable = true;
+  }
+
+  const ironIngots = craftBrain.countItem(_bot, 'iron_ingot');
+  const diamondCount = craftBrain.countItem(_bot, 'diamond');
+  const shieldCount = craftBrain.countItem(_bot, 'shield');
+  const hasShieldEquipped = !!_bot.inventory.slots[45] && _bot.inventory.slots[45].name === 'shield';
+  const hasShieldInInventory = shieldCount > 0;
+
+  const canCraftArmor = !!craftBrain.getBestCraftableTier?.(_bot, 'helmet', 1)
+    || !!craftBrain.getBestCraftableTier?.(_bot, 'chestplate', 1)
+    || !!craftBrain.getBestCraftableTier?.(_bot, 'leggings', 1)
+    || !!craftBrain.getBestCraftableTier?.(_bot, 'boots', 1);
+
+  return {
+    missingPieces,
+    upgradeAvailable,
+    equippedScore,
+    ironIngots,
+    diamondCount,
+    hasShieldEquipped,
+    hasShieldInInventory,
+    shouldCraftArmor: canCraftArmor && (missingPieces > 0 || equippedScore < 8 || upgradeAvailable),
+    shouldCraftShield: !hasShieldEquipped && !hasShieldInInventory && ironIngots >= 1 && craftBrain.countAnyOf(_bot, craftBrain.PLANK_TYPES) >= 6,
+  };
+}
+
+async function relocateToBetterBiomeForWood() {
+  announce('relocate_biome', 'No useful trees nearby here. Relocating toward a better biome.', 30000);
+  const preferredLogs = biom.getFallbackLogTypes(_bot);
+  const result = await mineBrain.wanderToTree(_bot, _options, preferredLogs);
+  if (result.success) {
+    announce('relocate_found', 'Found a better area with wood. Switching back to gathering.', 25000);
+    return true;
+  }
+
+  const { GoalNear } = require('mineflayer-pathfinder').goals;
+  const angle = Math.random() * Math.PI * 2;
+  const distance = 80 + Math.random() * 80;
+  const target = _bot.entity.position.offset(Math.cos(angle) * distance, 0, Math.sin(angle) * distance);
+  try {
+    await _bot.pathfinder.goto(new GoalNear(target.x, _bot.entity.position.y, target.z, 6));
+    return true;
+  } catch (err) {
+    log(`Biome relocation failed: ${err.message}`);
+    return false;
+  }
+}
+
+async function handleStarterBuildOrCraft() {
+  const stock = hasStarterBuildMaterials();
+  if (!stock.ready) return false;
+
+  if (stock.table < 1) {
+    await skills.craftItem(_bot, 'crafting_table', 1);
+    return true;
+  }
+  if (stock.furnace < 1 && stock.cobble >= 8) {
+    await skills.craftItem(_bot, 'furnace', 1);
+    return true;
+  }
+  if (stock.torches < 4) {
+    try { await skills.craftItem(_bot, 'torch', 1); } catch {}
+  }
+
+  announce('starter_build', 'Enough starter materials collected. Beginning base setup.', 30000);
+  const pos = _bot.entity.position.floored();
+  await _bot.executeAction({
+    action: 'build_house',
+    blueprint: 'home',
+    x: pos.x + 2,
+    y: pos.y,
+    z: pos.z + 2,
+    facing: 'south',
+  });
+  return true;
+}
+
+function findRecoverableDrops(maxDistance = 50) {
+  return Object.values(_bot.entities || {})
+    .filter(entity => {
+      if (!entity || !entity.isValid || entity.name !== 'item') return false;
+      return entity.position.distanceTo(_bot.entity.position) <= maxDistance;
+    })
+    .sort((a, b) => a.position.distanceTo(_bot.entity.position) - b.position.distanceTo(_bot.entity.position));
+}
+
+async function collectNearbyDropsWithinRadius(maxDistance = 50) {
+  const nearbyDrops = findRecoverableDrops(maxDistance);
+  if (nearbyDrops.length === 0) return false;
+
+  announce('collect_drops', `Collecting dropped items nearby (${nearbyDrops.length} found).`, 20000);
+
+  for (const item of nearbyDrops.slice(0, 12)) {
+    if (!item?.isValid) continue;
+    try {
+      await _bot.pathfinder.goto(new goals.GoalNear(item.position.x, item.position.y, item.position.z, 1));
+      await sleep(150);
+    } catch {
+      // item may despawn or become unreachable
+    }
+  }
+
+  await collectDrops(_bot, goals, 150, { maxDistance, maxItems: 24, passes: 2 });
+  return true;
+}
+
+async function handleDeathRecovery() {
+  const recovery = _state.deathRecovery;
+  if (!recovery || recovery.done) return false;
+  if (!shouldAttemptDeathRecovery(_bot, recovery)) {
+    recovery.done = true;
+    return false;
+  }
+
+  const threatReport = mineBrain.scanThreatLevel(_bot, _options);
+  if (threatReport.level === 'high' || _bot.health <= 7) {
+    announce('death_recovery_wait', 'Dropped gear detected, but the area is too dangerous to recover it right now.', 20000);
+    return true;
+  }
+
+  const nearbyDrops = Object.values(_bot.entities).filter(entity => {
+    if (!entity || !entity.isValid || entity.name !== 'item') return false;
+    return entity.position.distanceTo(recovery.position) <= 12;
+  });
+
+  if (nearbyDrops.length === 0 && recovery.attempts > 0) {
+    recovery.done = true;
+    return false;
+  }
+
+  recovery.attempts += 1;
+  announce('death_recovery', 'Recovering my dropped items.', 15000);
+
+  try {
+    await _bot.pathfinder.goto(new goals.GoalNear(recovery.position.x, recovery.position.y, recovery.position.z, 2));
+    await collectDrops(_bot, goals, 250, { maxDistance: 14, maxItems: 20, passes: 3 });
+    await craftBrain.ensureArmor(_bot).catch(() => {});
+  } catch (err) {
+    log(`Death recovery failed: ${err.message}`);
+  }
+
+  if (recovery.attempts >= 3) {
+    recovery.done = true;
+  }
   return true;
 }
 
@@ -159,6 +416,55 @@ function releaseLock(actionName) {
 function currentLock() {
   if (isLocked()) return { owner: _lock.owner, priority: _lock.priority };
   return null;
+}
+
+function getActionCooldownMs(actionName) {
+  return ACTION_COOLDOWNS[actionName] || 0;
+}
+
+function canRunAction(action) {
+  if (!action) return false;
+  if (action.priority >= PRIORITIES.flee) return true;
+
+  const now = Date.now();
+  const cooldownUntil = _state.actionCooldowns[action.name] || 0;
+  if (now < cooldownUntil) return false;
+
+  const failure = _state.actionFailures[action.name];
+  if (failure && failure.count >= MAX_ACTION_FAILURES && now < failure.nextTryAt) {
+    return false;
+  }
+
+  return true;
+}
+
+function markActionFinished(action, failed = false) {
+  if (!action) return;
+  const now = Date.now();
+  const cooldownMs = getActionCooldownMs(action.name);
+  if (cooldownMs > 0 && action.priority < PRIORITIES.flee) {
+    _state.actionCooldowns[action.name] = now + cooldownMs;
+  }
+
+  if (failed) {
+    const previous = _state.actionFailures[action.name] || { count: 0, nextTryAt: 0 };
+    const count = previous.count + 1;
+    _state.actionFailures[action.name] = {
+      count,
+      nextTryAt: now + Math.min(ACTION_FAILURE_BACKOFF_MS * count, 60000),
+    };
+  } else {
+    delete _state.actionFailures[action.name];
+  }
+}
+
+function chooseBestAction(actions) {
+  actions.sort((a, b) => b.priority - a.priority);
+  const selected = actions.find(canRunAction);
+  if (selected) return selected;
+
+  const emergency = actions.find(action => action.priority >= PRIORITIES.flee);
+  return emergency || null;
 }
 
 function shouldTreatAsExternalActiveTask(taskName) {
@@ -280,6 +586,12 @@ function assessSituation() {
   const biomeName     = biom.getBiomeName(_bot);
   const biomeCategory = biomePlan.category;
   const biomeRisk     = biom.getRiskFlags(_bot);
+  const biomeHazards  = biom.getHazards(_bot);
+  const biomeStrategy = {
+    priorities: biom.getSurvivalPriorities(_bot).slice(0, 6),
+    resources: biom.getResourceTargets(_bot),
+    relocation: biom.getRelocationPlan(_bot),
+  };
 
   return {
     survivalScore: Math.max(0, Math.min(100, survivalScore)),
@@ -299,6 +611,8 @@ function assessSituation() {
     biomeName,
     biomeCategory,
     biomeRisk,
+    biomeHazards,
+    biomeStrategy,
   };
 }
 
@@ -314,6 +628,28 @@ function selectAction(situation) {
     hasPickaxe, hasAxe, hasSword, hasWeapon, hasFood, inCombat,
     biomeCategory, biomeRisk,
   } = situation;
+
+  if (shouldAttemptDeathRecovery(_bot, _state.deathRecovery) && threatReport.level !== 'high') {
+    actions.push({
+      name: 'death_recovery',
+      priority: PRIORITIES.flee + 1,
+      maxDuration: 20000,
+      execute: async () => {
+        await handleDeathRecovery();
+      },
+    });
+  }
+
+  if (!inCombat && threatReport.level === 'none' && findRecoverableDrops(50).length > 0) {
+    actions.push({
+      name: 'collect_dropped_items',
+      priority: PRIORITIES.gather + 1,
+      maxDuration: 20000,
+      execute: async () => {
+        await collectNearbyDropsWithinRadius(50);
+      },
+    });
+  }
 
   // ── 1. Drowning / Swimming emergency ──
   if (isDrowning || isUnderwater) {
@@ -500,6 +836,49 @@ function selectAction(situation) {
   // ── 10. Low resources (biome-aware) ──
   const biomeLogTypes = biom.getLogTypes(_bot);
   const logCount = craftBrain.countAnyOf(_bot, biomeLogTypes);
+  const starterStock = hasStarterBuildMaterials();
+  if (starterStock.ready && isDaytime && threatReport.level === 'none') {
+    actions.push({
+      name: 'starter_build',
+      priority: PRIORITIES.upgrade + 2,
+      maxDuration: 120000,
+      execute: async () => {
+        await handleStarterBuildOrCraft();
+      },
+    });
+  }
+
+  {
+    const armorState = getArmorManagementState();
+    if (armorState.shouldCraftArmor && isDaytime && threatReport.level === 'none') {
+      actions.push({
+        name: 'craft_armor',
+        priority: PRIORITIES.upgrade + 1,
+        maxDuration: 20000,
+        execute: async () => {
+          announce('craft_armor', 'Crafting and managing armor upgrades.', 20000);
+          await craftBrain.ensureArmor(_bot).catch(() => {});
+        },
+      });
+    }
+
+    if (armorState.shouldCraftShield && threatReport.level !== 'high') {
+      actions.push({
+        name: 'craft_shield',
+        priority: PRIORITIES.craft_tools + 1,
+        maxDuration: 10000,
+        execute: async () => {
+          announce('craft_shield', 'Crafting a shield for safer combat.', 20000);
+          await skills.craftItem(_bot, 'shield', 1);
+          const shield = _bot.inventory.items().find(item => item.name === 'shield');
+          if (shield) {
+            try { await _bot.equip(shield, 'off-hand'); } catch {}
+          }
+        },
+      });
+    }
+  }
+
   if (logCount < 10 && isDaytime && threatReport.level === 'none' && !isNight) {
     actions.push({
       name: 'gather_resources',
@@ -516,6 +895,8 @@ function selectAction(situation) {
           const wander = await mineBrain.wanderToTree(_bot, _options, plan.logTypes);
           if (wander.success) {
             await mineBrain.cutTreeSafely(_bot, _options, plan.logTypes);
+          } else if (biomeRisk.shouldRelocateForWood) {
+            await relocateToBetterBiomeForWood();
           } else if (biom.needsSurfaceWood(_bot)) {
             const fallbackLogs = biom.getFallbackLogTypes(_bot);
             announce('gather_surface_fallback', `🌲 No native wood here — falling back to surface logs.`, 25000);
@@ -566,41 +947,27 @@ function selectAction(situation) {
 
   // ── 13. Auto-equip armor (quick, non-blocking) ──
   {
-    const armorSlots = [5, 6, 7, 8];
     const armorTypes = ['helmet', 'chestplate', 'leggings', 'boots'];
-    const armorDests = ['head', 'torso', 'legs', 'feet'];
-    let needsArmor = false;
-    for (let i = 0; i < armorSlots.length; i++) {
-      if (!_bot.inventory.slots[armorSlots[i]]) {
-        const tiers = ['netherite', 'diamond', 'iron', 'golden', 'chainmail', 'leather'];
-        for (const tier of tiers) {
-          if (_bot.inventory.items().find(it => it.name === `${tier}_${armorTypes[i]}`)) {
-            needsArmor = true;
-            break;
-          }
-        }
-      }
-      if (needsArmor) break;
-    }
+    const slotMap = { helmet: 5, chestplate: 6, leggings: 7, boots: 8 };
+    const tierScore = { leather: 1, golden: 2, chainmail: 3, iron: 4, diamond: 5, netherite: 6 };
+    const shouldUpgradeArmor = armorTypes.some(type => {
+      const equipped = _bot.inventory.slots[slotMap[type]];
+      const equippedTier = equipped ? (Object.keys(tierScore).find(t => equipped.name.startsWith(`${t}_`)) || '') : '';
+      const equippedScore = tierScore[equippedTier] || 0;
+      return _bot.inventory.items().some(item => {
+        if (!item.name.endsWith(`_${type}`)) return false;
+        const itemTier = Object.keys(tierScore).find(t => item.name.startsWith(`${t}_`)) || '';
+        return (tierScore[itemTier] || 0) > equippedScore;
+      });
+    });
 
-    if (needsArmor) {
+    if (shouldUpgradeArmor) {
       actions.push({
         name: 'equip_armor',
         priority: PRIORITIES.gather, // Low priority, quick action
         maxDuration: 5000,
         execute: async () => {
-          for (let i = 0; i < armorSlots.length; i++) {
-            if (_bot.inventory.slots[armorSlots[i]]) continue;
-            const tiers = ['netherite', 'diamond', 'iron', 'golden', 'chainmail', 'leather'];
-            for (const tier of tiers) {
-              const name = `${tier}_${armorTypes[i]}`;
-              const item = _bot.inventory.items().find(it => it.name === name);
-              if (item) {
-                try { await _bot.equip(item, armorDests[i]); } catch {}
-                break;
-              }
-            }
-          }
+          await craftBrain.ensureArmor(_bot).catch(() => {});
         },
       });
     }
@@ -621,6 +988,38 @@ function selectAction(situation) {
         },
       });
     }
+  }
+
+  if (
+    _bot.runAIAutonomy &&
+    _bot.aiAutonomy?.enabled &&
+    survivalScore >= 70 &&
+    health >= 14 &&
+    food >= 12 &&
+    threatReport.level === 'none' &&
+    !inCombat &&
+    !isNight &&
+    !isUnderwater &&
+    !isDrowning
+  ) {
+    actions.push({
+      name: 'ai_supervisor',
+      priority: PRIORITIES.idle + 3,
+      maxDuration: 45000,
+      execute: async () => {
+        announce('ai_supervisor', 'AI supervisor is choosing a safe autonomous goal.', 45000);
+        const result = await _bot.runAIAutonomy({
+          survivalScore,
+          biomeCategory,
+          biomeRisk,
+          topPriorities: situation.biomeStrategy?.priorities?.slice(0, 3) || [],
+          lastAction: _state.lastAction,
+        });
+        if (!result.success && result.reason !== 'cooldown') {
+          log(`AI supervisor skipped: ${result.reason}`);
+        }
+      },
+    });
   }
 
   // ── 15. Idle — nothing urgent ──
@@ -650,8 +1049,7 @@ function selectAction(situation) {
     });
   }
 
-  actions.sort((a, b) => b.priority - a.priority);
-  return actions[0];
+  return chooseBestAction(actions);
 }
 
 // ─── Sub-actions (extracted from survive.js) ─────────────────────────────────
@@ -935,11 +1333,11 @@ async function handleIdleBehaviors() {
       const pos = _state.shelterPos;
       const ceilingBlock = _bot.blockAt(pos.offset(0, 2, 0));
       if (ceilingBlock && ceilingBlock.name !== 'air') {
-        try { await _bot.dig(ceilingBlock); } catch {}
+        try { await digSafely(_bot, ceilingBlock, { requireDrops: true }); } catch {}
       }
       const wallBlock = _bot.blockAt(pos.offset(0, 1, -1));
       if (wallBlock && wallBlock.name !== 'air') {
-        try { await _bot.dig(wallBlock); } catch {}
+        try { await digSafely(_bot, wallBlock, { requireDrops: true }); } catch {}
       }
       _state.shelterPos = null;
       return;
@@ -967,7 +1365,7 @@ async function handleIdleBehaviors() {
           container.close();
           if (isDone) {
             _bot.chat("Smelting complete. Picking up furnace...");
-            await _bot.dig(furnaceBlock);
+            await digSafely(_bot, furnaceBlock, { requireDrops: true });
             _state.furnacePos = null;
             _state.smeltingActive = false;
           }
@@ -1063,8 +1461,8 @@ async function cortexTick() {
   if (!_state.surviveActive) {
     _state.surviveActive = true;
     const biomePlan = biom.getCurrentBiomePlan(_bot);
-    _bot.chat("💤 Player is idle. Cortex engaging autonomous survival mode...");
-    _bot.chat(biomePlan.survivalTip);
+    announce('autonomy_on', "💤 Player is idle. Cortex engaging autonomous survival mode...", 30000);
+    announce(`biome_tip:${biomePlan.category}`, biomePlan.survivalTip, 45000);
     log(`Autonomous mode activated. Biome: ${biomePlan.name}`);
   }
 
@@ -1113,11 +1511,14 @@ async function cortexTick() {
     rememberPersistentGoal(action);
     _bot._currentTask = `cortex:${action.name}`;
 
+    let actionFailed = false;
     try {
       await action.execute();
     } catch (err) {
+      actionFailed = true;
       log(`Action ${action.name} failed: ${err.message}`);
     } finally {
+      markActionFinished(action, actionFailed);
       releaseLock(action.name);
       if (_bot._currentTask === `cortex:${action.name}`) {
         _bot._currentTask = null;
@@ -1169,17 +1570,28 @@ function start(bot, options = {}) {
   _state.lastTickAt = Date.now();
   _state.lastSurvivalScore = 100;
   _state.lastAction = null;
+  _state.lastActionAt = 0;
+  _state.persistentGoal = null;
+  _state.persistentSince = 0;
   _state.tickCount = 0;
   _state.surviveActive = false;
   _state.shelterPos = null;
   _state.furnacePos = null;
   _state.smeltingActive = false;
   _state.announcements = {};
+  _state.actionCooldowns = {};
+  _state.actionFailures = {};
 
   // Death snapshot listener
   _state._onDeath = () => {
     log('Bot died. Recording death snapshot.');
-    // Could add death recovery logic here
+    _state.deathRecovery = {
+      position: _bot.entity.position.clone(),
+      lostItems: snapshotInventory(_bot),
+      createdAt: Date.now(),
+      attempts: 0,
+      done: false,
+    };
   };
   bot.on('death', _state._onDeath);
 
@@ -1220,6 +1632,7 @@ function releaseExternalAction(actionName) {
 }
 
 function getStatus() {
+  const biomePlan = _bot ? biom.getCurrentBiomePlan(_bot) : null;
   return {
     running: _running,
     surviveActive: _state.surviveActive,
@@ -1228,6 +1641,17 @@ function getStatus() {
     tickCount: _state.tickCount,
     currentLock: currentLock(),
     tickInterval: getTickInterval(),
+    persistentGoal: _state.persistentGoal,
+    cooldowns: { ..._state.actionCooldowns },
+    failures: { ..._state.actionFailures },
+    aiAutonomy: _bot?.aiAutonomy ? { ..._bot.aiAutonomy } : null,
+    biome: biomePlan ? {
+      name: biomePlan.name,
+      category: biomePlan.category,
+      hazards: biom.getHazards(_bot),
+      topPriorities: biom.getSurvivalPriorities(_bot).slice(0, 3),
+      relocation: biom.getRelocationPlan(_bot),
+    } : null,
   };
 }
 

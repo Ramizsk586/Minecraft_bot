@@ -36,6 +36,32 @@ module.exports = {
 
   usefulItems: ['bucket', 'fishing_rod', 'boat', 'sugar_cane'],
 
+  hazards: ['drowning', 'guardian', 'drowned', 'no_native_wood', 'slow_movement'],
+
+  resourceTargets: {
+    immediate: ['shore', 'air', 'boat', 'kelp'],
+    tools: ['shore_stone', 'cobblestone', 'sandstone'],
+    food: ['cod', 'salmon', 'kelp', 'shipwreck_chest'],
+    safety: ['boat', 'door', 'torch', 'sandstone'],
+  },
+
+  relocation: {
+    enabled: true,
+    trigger: 'in_water_or_no_shore',
+    searchFor: ['shore', 'forest', 'plains', 'village', 'shipwreck'],
+    maxLocalSearchRadius: 48,
+    travelRadius: 256,
+  },
+
+  survivalPriorities: [
+    { action: 'relocate', target: 'nearest_shore', urgency: 100, reason: 'drowning beats every other task' },
+    { action: 'surface', target: 'air', urgency: 98, reason: 'keep air before pathing or mining' },
+    { action: 'find_wood', target: 'shore_trees', urgency: 88, reason: 'ocean has no native early wood' },
+    { action: 'craft', target: 'boat', urgency: 72, reason: 'fast water travel and escape' },
+    { action: 'find_food', target: 'fish_or_kelp', urgency: 66, reason: 'food before long shoreline travel' },
+    { action: 'mine', target: 'shore_stone', urgency: 54, reason: 'avoid underwater mining until geared' },
+  ],
+
   survivalSteps: [
     '🌊 PRIORITY ONE: swim to the nearest shore immediately — avoid drowning',
     'Watch air bar — surface regularly to breathe',

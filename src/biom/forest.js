@@ -38,6 +38,32 @@ module.exports = {
 
   usefulItems: ['apple', 'stick', 'wheat_seeds', 'bone_meal'],
 
+  hazards: ['night_mobs', 'dense_canopy', 'ravines', 'berry_bushes'],
+
+  resourceTargets: {
+    immediate: ['oak_log', 'birch_log', 'stone', 'food_animal'],
+    tools: ['cobblestone', 'coal_ore', 'iron_ore'],
+    food: ['cow', 'pig', 'chicken', 'sheep', 'apple', 'wheat_seeds'],
+    safety: ['cobblestone', 'torch', 'bed', 'shield'],
+  },
+
+  relocation: {
+    enabled: false,
+    trigger: 'stay_local_unless_no_resources',
+    searchFor: ['open_plains', 'river', 'village'],
+    maxLocalSearchRadius: 96,
+    travelRadius: 128,
+  },
+
+  survivalPriorities: [
+    { action: 'find_wood', target: 'oak_log', urgency: 96, reason: 'fastest reliable start' },
+    { action: 'craft', target: 'wooden_pickaxe', urgency: 88, reason: 'wooden-first progression gate' },
+    { action: 'mine', target: 'cobblestone', urgency: 80, reason: 'upgrade into stone tools' },
+    { action: 'find_food', target: 'passive_animals', urgency: 70, reason: 'stable early food source' },
+    { action: 'craft', target: 'torch', urgency: 64, reason: 'forest canopy gets dark quickly' },
+    { action: 'mine', target: 'iron_ore', urgency: 54, reason: 'iron armor and shield after basics' },
+  ],
+
   survivalSteps: [
     'Chop nearby oak or birch trees for logs',
     'Craft planks → crafting table → wooden pickaxe',

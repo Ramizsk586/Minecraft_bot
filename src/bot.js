@@ -2,7 +2,7 @@ require('dotenv').config();
 const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 
-const { normalizeMinecraftVersion, extractJson, sleep } = require('./utils');
+const { normalizeMinecraftVersion, extractJson, sleep, installCompactChat } = require('./utils');
 const { getWorldState } = require('./worldState');
 const { createExecutor } = require('./actions/index');
 const brain = require('./brain/index');
@@ -27,9 +27,11 @@ function buildLlmConfig() {
       : 'https://openrouter.ai/api/v1'),
     llmApiKey: envValue('MODEL_KEY') || envValue('LLM_API_KEY') || envValue('OPENROUTER_API_KEY'),
     llmModel: envValue('LLM_MODEL') || (provider === 'ollama' ? 'llama3' : 'openai/gpt-4o-mini'),
-    llmReferer: envValue('OPENROUTER_SITE_URL'),
-    llmTitle: envValue('OPENROUTER_APP_NAME', 'Minecraft AI Bot'),
-  };
+  llmReferer: envValue('OPENROUTER_SITE_URL'),
+  llmTitle: envValue('OPENROUTER_APP_NAME', 'Minecraft AI Bot'),
+  aiAutonomyEnabled: envValue('AI_AUTONOMY', 'true').toLowerCase() !== 'false',
+  aiAutonomyIntervalMs: parseInt(envValue('AI_AUTONOMY_INTERVAL_MS', '45000'), 10) || 45000,
+};
 }
 
 // ????????? Config ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
@@ -56,12 +58,18 @@ const MAX_AI_EMPTY_RETRIES = 2;
 
 let bot;
 let conversationHistory = [];
+let autonomyHistory = [];
 let isThinking = false;
 let executeAction = null;
 let reconnectTimer = null;
 let reconnectAttempt = 0;
 let reconnectDelayOverrideMs = null;
 let pendingResumeTask = null;
+const aiAutonomyState = {
+  enabled: config.aiAutonomyEnabled,
+  lastPlanAt: 0,
+  lastErrorAt: 0,
+};
 
 function shouldPersistActionPlan(action) {
   if (!action || typeof action !== 'object') return false;
@@ -166,6 +174,7 @@ function createBot() {
     username: config.username,
     version: config.version,
   });
+  installCompactChat(bot, { maxLength: parseInt(envValue('CHAT_MAX_LENGTH', '96'), 10) || 96 });
 
   bot.loadPlugin(pathfinder);
 
@@ -184,6 +193,8 @@ function createBot() {
     // Initialize the action executor with all modules
     executeAction = createExecutor(bot);
     bot.executeAction = executeAction;
+    bot.runAIAutonomy = runAIAutonomy;
+    bot.aiAutonomy = aiAutonomyState;
     bot.library = {
       functions: libraryFunctions,
       skills: librarySkills,
@@ -323,9 +334,71 @@ GUIDELINES:
 - For mining, prefer the correct tool. The bot auto-equips the best tool.
 - The bot auto-eats when hungry, auto-crafts weapons before combat, and auto-equips armor.
 - If the task is impossible or you need clarification, use "chat" to explain why.
+- Keep every "chat" message short: one compact sentence, under 80 characters.
 - When building structures, use "build" with type "walls" for custom sizes, or "build_house" for built-in JSON blueprints like home, farm, animal pen, cooking shack, storage hut, watch tower, and ironfarm.
 - For farming, use "create_farm" to set up new farms, "harvest" with replant for ongoing harvesting.
 - Use "house_plan" when you want to report the blueprint and materials before building.`;
+
+const AUTONOMY_PROMPT = `You are the autonomous supervisor for a Minecraft bot.
+Return ONLY one JSON action object. No markdown, no explanation.
+
+Goal: keep the bot productively alive when the player is idle.
+The local survival cortex already handles emergencies: combat, drowning, eating, death recovery, and night shelter.
+You should choose only safe long-term survival improvements.
+
+Allowed autonomous actions:
+- {"action":"chat","message":"short status"}
+- {"action":"collect"}
+- {"action":"chop_tree"}
+- {"action":"gather_wood","count":1,"replant":false}
+- {"action":"mine","block":"stone|cobblestone|coal_ore|iron_ore|sand|sandstone","count":number}
+- {"action":"craft","item":"crafting_table|stick|torch|furnace|bread|shield|wooden_pickaxe|stone_pickaxe|stone_sword|stone_axe|iron_pickaxe|iron_sword","count":number}
+- {"action":"farm_cycle"}
+- {"action":"sequence","steps":[2 to 5 allowed actions]}
+
+Rules:
+- Do not attack unless directly commanded by player; cortex handles threats.
+- Do not build large structures unless enough materials are clearly available.
+- Do not mine ores that require a better pickaxe than the bot has.
+- Prefer wooden-first then stone then iron progression.
+- If biome strategy says relocate for wood/shore, prefer gather_wood or safe mining before wandering.
+- Keep actions small: counts <= 16 for mining, count <= 1 for gather_wood.
+- If no productive safe step exists, return {"action":"chat","message":"Autonomy stable: monitoring."}.`;
+
+const AUTONOMY_ALLOWED_ACTIONS = new Set([
+  'chat',
+  'collect',
+  'chop_tree',
+  'gather_wood',
+  'mine',
+  'craft',
+  'farm_cycle',
+  'sequence',
+]);
+
+const AUTONOMY_MINE_BLOCKS = new Set([
+  'stone',
+  'cobblestone',
+  'coal_ore',
+  'iron_ore',
+  'sand',
+  'sandstone',
+]);
+
+const AUTONOMY_CRAFT_ITEMS = new Set([
+  'crafting_table',
+  'stick',
+  'torch',
+  'furnace',
+  'bread',
+  'shield',
+  'wooden_pickaxe',
+  'stone_pickaxe',
+  'stone_sword',
+  'stone_axe',
+  'iron_pickaxe',
+  'iron_sword',
+]);
 
 async function askAI(username, userMessage) {
   if (!config.llmApiKey) {
@@ -402,6 +475,135 @@ async function askAI(username, userMessage) {
   return raw;
 }
 
+function sanitizeAutonomyAction(action, depth = 0) {
+  if (!action || typeof action !== 'object') return null;
+  if (!AUTONOMY_ALLOWED_ACTIONS.has(action.action)) return null;
+
+  if (action.action === 'sequence') {
+    if (depth > 0 || !Array.isArray(action.steps)) return null;
+    const steps = action.steps
+      .slice(0, 5)
+      .map(step => sanitizeAutonomyAction(step, depth + 1))
+      .filter(Boolean);
+    return steps.length > 0 ? { action: 'sequence', steps } : null;
+  }
+
+  if (action.action === 'mine') {
+    const block = String(action.block || '').trim().toLowerCase();
+    if (!AUTONOMY_MINE_BLOCKS.has(block)) return null;
+    const count = Math.max(1, Math.min(parseInt(action.count, 10) || 4, 16));
+    return { action: 'mine', block, count };
+  }
+
+  if (action.action === 'craft') {
+    const item = String(action.item || '').trim().replace(/\s+/g, '_').toLowerCase();
+    if (!AUTONOMY_CRAFT_ITEMS.has(item)) return null;
+    const count = Math.max(1, Math.min(parseInt(action.count, 10) || 1, 8));
+    return { action: 'craft', item, count };
+  }
+
+  if (action.action === 'gather_wood') {
+    return { action: 'gather_wood', count: 1, replant: false };
+  }
+
+  if (action.action === 'chat') {
+    const message = String(action.message || 'Autonomy stable: monitoring.').slice(0, 120);
+    return { action: 'chat', message };
+  }
+
+  return { action: action.action };
+}
+
+async function askAutonomousAI(context = {}) {
+  if (!config.llmApiKey) {
+    return { action: 'chat', message: 'AI autonomy disabled: missing model key.' };
+  }
+
+  const worldState = getWorldState(bot);
+  const cortexStatus = brain.cortex?.getStatus?.() || {};
+  const prompt = [
+    worldState,
+    '',
+    '=== CORTEX STATUS ===',
+    JSON.stringify(cortexStatus, null, 2),
+    '',
+    '=== AUTONOMY CONTEXT ===',
+    JSON.stringify(context, null, 2),
+  ].join('\n');
+
+  autonomyHistory.push({ role: 'user', content: prompt });
+  if (autonomyHistory.length > 8) {
+    autonomyHistory = autonomyHistory.slice(-8);
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  headers.Authorization = `Bearer ${config.llmApiKey}`;
+  if (config.provider !== 'ollama') {
+    if (config.llmReferer) headers['HTTP-Referer'] = config.llmReferer;
+    if (config.llmTitle) headers['X-Title'] = config.llmTitle;
+  }
+
+  const response = await fetch(`${config.llmApiBase}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: config.llmModel,
+      max_tokens: 512,
+      temperature: 0.15,
+      messages: [
+        { role: 'system', content: AUTONOMY_PROMPT },
+        ...autonomyHistory,
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Autonomy LLM request failed (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  const raw = data?.choices?.[0]?.message?.content?.trim() || '';
+  if (!raw) throw new Error('Autonomy LLM returned empty plan');
+  autonomyHistory.push({ role: 'assistant', content: raw });
+
+  const parsed = extractJson(raw);
+  return sanitizeAutonomyAction(parsed);
+}
+
+async function runAIAutonomy(context = {}) {
+  if (!aiAutonomyState.enabled) return { success: false, reason: 'disabled' };
+  if (!executeAction || !bot) return { success: false, reason: 'not ready' };
+  if (isThinking || bot.isThinking) return { success: false, reason: 'busy thinking' };
+
+  const now = Date.now();
+  if (now - aiAutonomyState.lastPlanAt < config.aiAutonomyIntervalMs) {
+    return { success: false, reason: 'cooldown' };
+  }
+
+  aiAutonomyState.lastPlanAt = now;
+  bot.isThinking = true;
+  bot._currentTask = 'autonomy:ai_supervisor';
+
+  try {
+    const action = await askAutonomousAI(context);
+    if (!action) return { success: false, reason: 'unsafe or invalid plan' };
+    console.log('AI autonomy action:', JSON.stringify(action));
+    await executeAction(action);
+    return { success: true, action };
+  } catch (err) {
+    aiAutonomyState.lastErrorAt = Date.now();
+    console.error('AI autonomy error:', err);
+    return { success: false, reason: err.message };
+  } finally {
+    bot.isThinking = false;
+    if (bot._currentTask === 'autonomy:ai_supervisor') {
+      bot._currentTask = null;
+    }
+    bot.lastInteractionTime = Date.now() - Math.max(config.aiAutonomyIntervalMs, 30000);
+  }
+}
+
 // ─── Command Handler ──────────────────────────────────────────────────────────
 
 async function handleCommand(username, command) {
@@ -426,11 +628,32 @@ async function handleCommand(username, command) {
     const ws = getWorldState(bot);
     const lines = ws.split('\n').slice(0, 8);
     lines.forEach(l => bot.chat(l));
+    bot.chat(`AI autonomy: ${aiAutonomyState.enabled ? 'ON' : 'OFF'} | interval ${Math.round(config.aiAutonomyIntervalMs / 1000)}s`);
+    return;
+  }
+
+  if (/^(ai\s*)?auto(nomy)?\s+on$/i.test(command)) {
+    aiAutonomyState.enabled = true;
+    bot.chat('AI autonomy enabled. I will let the AI supervise safe idle goals.');
+    return;
+  }
+
+  if (/^(ai\s*)?auto(nomy)?\s+off$/i.test(command)) {
+    aiAutonomyState.enabled = false;
+    bot.chat('AI autonomy disabled. Local cortex survival remains active.');
+    return;
+  }
+
+  if (/^(ai\s*)?auto(nomy)?\s*(status|report)?$/i.test(command)) {
+    const lastPlan = aiAutonomyState.lastPlanAt ? `${Math.round((Date.now() - aiAutonomyState.lastPlanAt) / 1000)}s ago` : 'never';
+    const lastError = aiAutonomyState.lastErrorAt ? `${Math.round((Date.now() - aiAutonomyState.lastErrorAt) / 1000)}s ago` : 'none';
+    bot.chat(`AI autonomy: ${aiAutonomyState.enabled ? 'ON' : 'OFF'} | last plan ${lastPlan} | last error ${lastError}`);
     return;
   }
 
   if (command === 'reset') {
     conversationHistory = [];
+    autonomyHistory = [];
     bot._currentTask = null;
     clearPendingResumeTask();
     bot.chat('Memory cleared, ready for new tasks!');

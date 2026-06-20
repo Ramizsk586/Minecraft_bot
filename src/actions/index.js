@@ -56,6 +56,11 @@ function createExecutor(bot) {
 
   // The unified executor
   async function executeAction(action) {
+    if (!action || typeof action !== 'object' || !action.action) {
+      bot.chat('Invalid action plan.');
+      return;
+    }
+
     console.log('🤖 Executing:', JSON.stringify(action));
 
     const handler = allHandlers[action.action];

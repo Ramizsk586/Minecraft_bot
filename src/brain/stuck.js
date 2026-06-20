@@ -22,6 +22,8 @@
 
 'use strict';
 
+const { digSafely } = require('../utils');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants & tunables
 // ─────────────────────────────────────────────────────────────────────────────
@@ -293,6 +295,15 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+async function tryDigSafely(bot, block) {
+  if (!block || block.name === 'air') return false;
+  const result = await digSafely(bot, block, { requireDrops: true });
+  if (!result.success) {
+    log(`  Safe dig skipped ${block.name}: ${result.reason}`);
+  }
+  return result.success;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Recovery routines
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,7 +322,7 @@ async function recoverSuffocation(bot) {
     try {
       if (bot.canDigBlock(block)) {
         log(`  Digging ${block.name} at ${vox.x},${vox.y},${vox.z}`);
-        await bot.dig(block, true);   // force = true skips delay check
+        await tryDigSafely(bot, block);
         await sleep(200);
       } else {
         // Can't dig (bedrock etc) – try jumping / strafing instead
@@ -415,7 +426,7 @@ async function recoverDrowning(bot) {
     for (let dy = 0; dy <= 3; dy++) {
       const block = blockAt(bot, head.x, head.y + dy, head.z);
       if (block && block.name !== 'air' && !isLiquid(bot, head.x, head.y+dy, head.z)) {
-        try { await bot.dig(block); } catch (_) {}
+        try { await tryDigSafely(bot, block); } catch (_) {}
       }
     }
   }
@@ -545,8 +556,8 @@ async function recoverHole(bot) {
       if (!b0 || !b1) continue;
       try {
         await bot.look(dir.yaw, 0);
-        if (b0.name !== 'air') await bot.dig(b0);
-        if (b1.name !== 'air') await bot.dig(b1);
+        if (b0.name !== 'air') await tryDigSafely(bot, b0);
+        if (b1.name !== 'air') await tryDigSafely(bot, b1);
         bot.setControlState('forward', true);
         bot.setControlState('jump', true);
         await sleep(600);
@@ -599,7 +610,7 @@ async function recoverPathfinderStuck(bot) {
     const frontBlock = blockAt(bot, Math.round(frontPos.x), Math.round(frontPos.y), Math.round(frontPos.z));
     if (frontBlock && frontBlock.name !== 'air' && bot.canDigBlock(frontBlock)) {
       log(`  Mining obstacle: ${frontBlock.name}`);
-      await bot.dig(frontBlock);
+      await tryDigSafely(bot, frontBlock);
     }
   } catch (e) { warn(`Obstacle mine failed: ${e.message}`); }
 

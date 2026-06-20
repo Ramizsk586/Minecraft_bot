@@ -4,7 +4,8 @@
 
 const { goals } = require('mineflayer-pathfinder');
 const { Vec3 } = require('vec3');
-const { sleep, findBestTool, collectDrops } = require('../utils');
+const { sleep, findBestTool, collectDrops, equipSafeToolForBlock, getSafeMiningCheck } = require('../utils');
+const miningRules = require('./miningRules');
 
 const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
@@ -212,33 +213,28 @@ function findWholeTree(bot, rootBlock, logTypes = LOG_TYPES) {
 
 function canMineQuickly(bot, block) {
   if (!block) return false;
-  if (SOFT_BLOCKS.has(block.name)) return true;
 
   try {
     const bestTool = findBestTool(bot, block.name);
-    const held = bot.heldItem;
+    const check = getSafeMiningCheck(bot, block.name, bestTool, { requireDrops: true });
+    if (!check.canMine || !check.willDrop) return false;
+    if (SOFT_BLOCKS.has(block.name)) return true;
     const digTime = bot.digTime(block);
-    if (bestTool) return digTime <= 1600;
-    return digTime <= 900;
+    return digTime <= 1600;
   } catch {
-    return SOFT_BLOCKS.has(block.name);
+    return false;
   }
 }
 
 async function equipToolFor(bot, blockName) {
-  const tool = findBestTool(bot, blockName);
-  if (!tool) return null;
-
-  try {
-    await bot.equip(tool, 'hand');
-    return tool;
-  } catch {
-    return null;
-  }
+  const { tool, check } = await equipSafeToolForBlock(bot, blockName, { requireDrops: true });
+  if (!check.canMine || !check.willDrop) return null;
+  return tool;
 }
 
 async function holdDigBlock(bot, block) {
   if (!block) return false;
+  if (!canMineQuickly(bot, block)) return false;
 
   try {
     // Use horizontal distance only — don't try to pathfind to the exact Y of
@@ -265,6 +261,9 @@ async function holdDigBlock(bot, block) {
 
     const fresh = bot.blockAt(block.position);
     if (!fresh || fresh.name === 'air' || !bot.canDigBlock(fresh)) return false;
+    const tool = findBestTool(bot, fresh.name);
+    const check = getSafeMiningCheck(bot, fresh.name, tool, { requireDrops: true });
+    if (!check.canMine || !check.willDrop) return false;
 
     await bot.lookAt(fresh.position.offset(0.5, 0.5, 0.5), true);
     await sleep(100);
@@ -324,6 +323,9 @@ async function ensureProgression(bot) {
   const logs = craftBrain.countAnyOf(bot, craftBrain.LOG_TYPES);
   const planks = craftBrain.countAnyOf(bot, craftBrain.PLANK_TYPES);
   const sticks = craftBrain.countItem(bot, 'stick');
+  const hasWoodenPickaxe = !!bot.inventory.items().find(item => item.name === 'wooden_pickaxe');
+  const hasWoodenAxe = !!bot.inventory.items().find(item => item.name === 'wooden_axe');
+  const hasWoodenSword = !!bot.inventory.items().find(item => item.name === 'wooden_sword');
   const hasTable = craftBrain.countItem(bot, 'crafting_table') > 0 ||
     !!bot.findBlock({ matching: bot.registry.blocksByName['crafting_table']?.id, maxDistance: 12 });
 
@@ -343,19 +345,19 @@ async function ensureProgression(bot) {
     if (crafted.success) results.push('crafting_table');
   }
 
-  if (!hasTool(bot, 'axe')) {
-    const crafted = await craftBrain.craftBestTiered(bot, 'axe', 1, { silent: true });
-    if (crafted.success) results.push(crafted.crafted);
+  if (!hasWoodenAxe && hasTable && planks >= 3 && sticks >= 2) {
+    const crafted = await craftBrain.craft(bot, 'wooden_axe', 1, { silent: true });
+    if (crafted.success) results.push('wooden_axe');
   }
 
-  if (!hasTool(bot, 'pickaxe')) {
-    const crafted = await craftBrain.craftBestTiered(bot, 'pickaxe', 1, { silent: true });
-    if (crafted.success) results.push(crafted.crafted);
+  if (!hasWoodenPickaxe && hasTable && planks >= 3 && sticks >= 2) {
+    const crafted = await craftBrain.craft(bot, 'wooden_pickaxe', 1, { silent: true });
+    if (crafted.success) results.push('wooden_pickaxe');
   }
 
-  if (!bestTierName(bot, 'sword')) {
-    const crafted = await craftBrain.craftBestTiered(bot, 'sword', 1, { silent: true });
-    if (crafted.success) results.push(crafted.crafted);
+  if (!hasWoodenSword && hasTable && planks >= 2 && sticks >= 1) {
+    const crafted = await craftBrain.craft(bot, 'wooden_sword', 1, { silent: true });
+    if (crafted.success) results.push('wooden_sword');
   }
 
   return results;

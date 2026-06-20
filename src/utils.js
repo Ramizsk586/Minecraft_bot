@@ -26,6 +26,62 @@ function extractJson(raw) {
 
 // ─── Tool Selection Helpers ───────────────────────────────────────────────────
 
+function compactChatMessage(message, maxLength = 96) {
+  let text = String(message ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+
+  const replacements = [
+    [/Something went wrong with my brain\. Try again!/i, 'Brain error. Try again.'],
+    [/My AI brain returned an empty plan\..*/i, 'AI returned no plan.'],
+    [/AI autonomy enabled\..*/i, 'AI autonomy: ON'],
+    [/AI autonomy disabled\..*/i, 'AI autonomy: OFF'],
+    [/Player is idle\. Cortex engaging autonomous survival mode\./i, 'Idle: survival ON.'],
+    [/AI supervisor is choosing a safe autonomous goal\./i, 'AI choosing goal.'],
+    [/Collecting dropped items nearby \((\d+) found\)\./i, 'Collecting drops: $1'],
+    [/No useful trees nearby here\. Relocating toward a better biome\./i, 'No trees. Relocating.'],
+    [/Enough starter materials collected\. Beginning base setup\./i, 'Starter base setup.'],
+    [/Critical health \((\d+)\/20\)! Fleeing!/i, 'HP $1/20: fleeing.'],
+    [/Crafting and managing armor upgrades\./i, 'Armor upgrade.'],
+    [/Crafting a shield for safer combat\./i, 'Crafting shield.'],
+    [/Gathering ([^ ]+) for this biome\.\.\./i, 'Gathering $1.'],
+    [/No ([^ ]+) nearby.*searching\.\.\./i, 'No $1 nearby. Searching.'],
+    [/Started cooking food\./i, 'Cooking food.'],
+    [/Running a farming cycle\.\.\./i, 'Farming.'],
+    [/Going to sleep\.\.\./i, 'Sleeping.'],
+    [/Shelter complete\. Staying inside until dawn\./i, 'Shelter ready.'],
+    [/Mining some ([^ ]+) for emergency shelter\.\.\./i, 'Mining $1 for shelter.'],
+    [/No pickaxe.*going to chop ([^ ]+)\./i, 'Need pickaxe. Chopping $1.'],
+    [/Mining ([^ ]+) to upgrade tools\.\.\./i, 'Mining $1 for tools.'],
+    [/Upgrading to (.+)!/i, 'Upgrade: $1.'],
+    [/Searching for (coal|iron ore)\.\.\./i, 'Searching: $1.'],
+    [/Smelting complete\. Picking up furnace\.\.\./i, 'Smelting done.'],
+    [/Morning! Leaving shelter\.\.\./i, 'Morning. Leaving shelter.'],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    text = text.replace(pattern, replacement);
+  }
+
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function installCompactChat(bot, options = {}) {
+  if (!bot || bot._compactChatInstalled || typeof bot.chat !== 'function') return;
+
+  const maxLength = Number.isFinite(options.maxLength) ? options.maxLength : 96;
+  const originalChat = bot.chat.bind(bot);
+
+  bot._compactChatInstalled = true;
+  bot.chat = (message) => {
+    const compact = compactChatMessage(message, maxLength);
+    if (!compact) return undefined;
+    return originalChat(compact);
+  };
+}
+
 const TOOL_FOR_BLOCK = {
   // Pickaxe blocks
   stone: 'pickaxe', cobblestone: 'pickaxe', deepslate: 'pickaxe',
@@ -85,6 +141,13 @@ function findBestTool(bot, blockName) {
   if (!toolType) return null;
 
   const items = bot.inventory.items();
+  if (toolType === 'shears') {
+    const shears = items.find(i => i.name === 'shears');
+    if (!shears) return null;
+    const check = miningRules.checkToolForBlock(shears, blockName);
+    return check.willDrop ? shears : null;
+  }
+
   for (const tier of TOOL_TIERS) {
     const toolName = `${tier}_${toolType}`;
     const found = items.find(i => i.name === toolName);
@@ -98,6 +161,53 @@ function findBestTool(bot, blockName) {
     return found;
   }
   return null;
+}
+
+function getSafeMiningCheck(bot, blockName, tool = null, options = {}) {
+  const { requireDrops = true } = options;
+  const check = miningRules.checkToolForBlock(tool, blockName);
+  if (!check.canMine) return check;
+  if (requireDrops && !check.willDrop) return check;
+  return { ...check, canMine: true };
+}
+
+async function equipSafeToolForBlock(bot, blockName, options = {}) {
+  const tool = findBestTool(bot, blockName);
+  const check = getSafeMiningCheck(bot, blockName, tool, options);
+  if (!check.canMine || (options.requireDrops !== false && !check.willDrop)) {
+    return { tool: null, check };
+  }
+
+  if (tool) {
+    try {
+      await bot.equip(tool, 'hand');
+    } catch (err) {
+      return {
+        tool: null,
+        check: { canMine: false, willDrop: false, reason: `failed to equip ${tool.name}: ${err.message}` },
+      };
+    }
+  }
+
+  return { tool, check };
+}
+
+async function digSafely(bot, block, options = {}) {
+  if (!block || block.name === 'air' || block.name === 'cave_air') {
+    return { success: false, reason: 'no block to dig' };
+  }
+
+  const { tool, check } = await equipSafeToolForBlock(bot, block.name, { requireDrops: true, ...options });
+  if (!check.canMine || (options.requireDrops !== false && !check.willDrop)) {
+    return { success: false, reason: check.reason, tool };
+  }
+
+  if (!bot.canDigBlock(block)) {
+    return { success: false, reason: `${block.name} is not diggable from here`, tool };
+  }
+
+  await bot.dig(block, true);
+  return { success: true, reason: check.reason, tool };
 }
 
 // ─── Food Priority ────────────────────────────────────────────────────────────
@@ -170,7 +280,12 @@ module.exports = {
   sleep,
   normalizeMinecraftVersion,
   extractJson,
+  compactChatMessage,
+  installCompactChat,
   findBestTool,
+  getSafeMiningCheck,
+  equipSafeToolForBlock,
+  digSafely,
   findBestFood,
   collectDrops,
   TOOL_FOR_BLOCK,

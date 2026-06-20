@@ -2,7 +2,7 @@
 // Instant, LLM-free combat logic. Scans inventory, scores weapons, equips the
 // strongest option, and drives melee/ranged attacks without AI calls.
 
-const { sleep, findBestTool } = require('../utils');
+const { sleep, digSafely } = require('../utils');
 
 const ATTACK_TICK_MS = 550;
 const TAUNT_COOLDOWN_MS = 4500;
@@ -157,7 +157,27 @@ async function equipBestWeapon(bot) {
   }
 
   await bot.equip(best.item, 'hand');
+  const heldName = bot.heldItem?.name;
+  return heldName === best.item.name ? best : null;
+}
+
+async function prepareCombatWeapon(bot) {
+  let best = await equipBestWeapon(bot).catch(() => null);
+  if (best) return best;
+
+  try {
+    const craftBrain = require('./craft');
+    await craftBrain.ensureWeapon(bot);
+  } catch (err) {
+    console.log(`[Combat] Weapon preparation failed: ${err.message}`);
+  }
+
+  best = await equipBestWeapon(bot).catch(() => null);
   return best;
+}
+
+function hasAnyWeapon(bot) {
+  return rankWeapons(bot).length > 0;
 }
 
 function describeEntity(entity) {
@@ -202,7 +222,16 @@ function canSendCombatLine(bot, key, cooldownMs = COMBAT_CHAT_COOLDOWN_MS) {
 
 function sendCombatLine(bot, key, message, cooldownMs = COMBAT_CHAT_COOLDOWN_MS) {
   if (!message) return false;
+  if (!bot._combatChatState) {
+    bot._combatChatState = {};
+  }
+  const now = Date.now();
+  if (bot._combatChatState.lastMessage === message && now - (bot._combatChatState.lastMessageAt || 0) < cooldownMs) {
+    return false;
+  }
   if (!canSendCombatLine(bot, key, cooldownMs)) return false;
+  bot._combatChatState.lastMessage = message;
+  bot._combatChatState.lastMessageAt = now;
   bot.chat(message);
   return true;
 }
@@ -324,17 +353,14 @@ async function digTowardTarget(bot, target, state) {
   }
 
   const block = candidates[0];
-  const tool = findBestTool(bot, block.name);
   state.isDiggingPath = true;
   state.lastDigAt = now;
   stopMovement(bot);
 
   try {
-    if (tool) {
-      await bot.equip(tool, 'hand').catch(() => {});
-    }
     await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true);
-    await bot.dig(block, true);
+    const digResult = await digSafely(bot, block, { requireDrops: true });
+    if (!digResult.success) return false;
     await sleep(120);
     return true;
   } catch (err) {
@@ -397,12 +423,18 @@ async function fireRanged(bot, target, weaponData) {
   bot.deactivateItem();
 }
 
-async function strikeMelee(bot, target) {
+async function strikeMelee(bot, target, weapon = null) {
+  const activeWeapon = weapon || await equipBestWeapon(bot).catch(() => null);
+  if (!activeWeapon && hasAnyWeapon(bot)) {
+    return false;
+  }
+
   try {
     await bot.lookAt(target.position.offset(0, 1.0, 0), true);
   } catch {}
 
   bot.attack(target);
+  return true;
 }
 
 async function startAttack(bot, target, options = {}) {
@@ -425,7 +457,7 @@ async function startAttack(bot, target, options = {}) {
 
   stopAttack(bot, { silent: true });
 
-  const best = await equipBestWeapon(bot).catch(() => null);
+  const best = await prepareCombatWeapon(bot);
 
   // Auto-equip shield to off-hand if we have one
   const shield = bot.inventory.items().find(i => i.name === 'shield');
@@ -505,7 +537,7 @@ async function startAttack(bot, target, options = {}) {
     state.lastSeenAt = Date.now();
 
     const distance = bot.entity.position.distanceTo(activeTarget.position);
-    const weapon = await equipBestWeapon(bot).catch(() => null);
+    const weapon = await prepareCombatWeapon(bot);
     const weaponData = weapon?.weaponData || null;
     const obstacle = findCombatObstacle(bot, activeTarget);
 
@@ -531,10 +563,12 @@ async function startAttack(bot, target, options = {}) {
 
     if (!weaponData) {
       if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
-        sendCombatLine(bot, `fists:${state.enemyName}`, `No weapon ready, ${state.enemyName}. Still fighting.`, TAUNT_COOLDOWN_MS);
+        sendCombatLine(bot, `fists:${state.enemyName}`, `No weapon ready, ${state.enemyName}. Keeping distance.`, TAUNT_COOLDOWN_MS);
         state.lastTauntAt = Date.now();
       }
-      await strikeMelee(bot, activeTarget).catch(() => {});
+      if (!hasAnyWeapon(bot)) {
+        await strikeMelee(bot, activeTarget, null).catch(() => {});
+      }
       return;
     }
 
@@ -547,13 +581,13 @@ async function startAttack(bot, target, options = {}) {
     if (canUseRanged(bot, weaponData, distance)) {
       bot.setControlState('forward', false);
       bot.setControlState('sprint', false);
-      await fireRanged(bot, activeTarget, weaponData).catch(() => strikeMelee(bot, activeTarget).catch(() => {}));
+      await fireRanged(bot, activeTarget, weaponData).catch(() => strikeMelee(bot, activeTarget, weapon).catch(() => {}));
     } else {
       if (obstacle && distance <= 4.5) {
         const tunneled = await digTowardTarget(bot, activeTarget, state).catch(() => false);
         if (tunneled) return;
       }
-      await strikeMelee(bot, activeTarget).catch(() => {});
+      await strikeMelee(bot, activeTarget, weapon).catch(() => {});
     }
 
     if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
@@ -635,6 +669,7 @@ module.exports = {
   rankWeapons,
   pickBestWeapon,
   equipBestWeapon,
+  prepareCombatWeapon,
   startAttack,
   stopAttack,
   combatReport,

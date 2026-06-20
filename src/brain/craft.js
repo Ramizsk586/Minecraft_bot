@@ -5,7 +5,7 @@
 // Integrates with eat.js (craft bread when hungry) and attack.js/defance.js
 // (craft weapon/armor before combat).
 
-const { collectDrops, findBestTool } = require('../utils');
+const { collectDrops, digSafely } = require('../utils');
 
 // ─── Material Tiers ───────────────────────────────────────────────────────────
 // Ordered best → worst. The brain tries the best tier first and falls back.
@@ -14,10 +14,28 @@ const MATERIAL_TIERS = [
   { tier: 'netherite', material: 'netherite_ingot', plankBased: false, level: 6 },
   { tier: 'diamond',   material: 'diamond',         plankBased: false, level: 5 },
   { tier: 'iron',      material: 'iron_ingot',      plankBased: false, level: 4 },
-  { tier: 'golden',    material: 'gold_ingot',      plankBased: false, level: 3 },
   { tier: 'stone',     material: 'cobblestone',     plankBased: false, level: 2 },
+  { tier: 'golden',    material: 'gold_ingot',      plankBased: false, level: 1 },
   { tier: 'wooden',    material: null,               plankBased: true,  level: 1 },
 ];
+
+const CRAFT_ALIASES = {
+  wood_sword: 'wooden_sword',
+  wood_axe: 'wooden_axe',
+  wood_pickaxe: 'wooden_pickaxe',
+  wood_shovel: 'wooden_shovel',
+  wood_hoe: 'wooden_hoe',
+  gold_sword: 'golden_sword',
+  gold_axe: 'golden_axe',
+  gold_pickaxe: 'golden_pickaxe',
+  gold_shovel: 'golden_shovel',
+  gold_hoe: 'golden_hoe',
+  table: 'crafting_table',
+  workbench: 'crafting_table',
+  craftingtable: 'crafting_table',
+  sticks: 'stick',
+  planks: 'planks',
+};
 
 // All log types that can be converted to planks
 const LOG_TYPES = [
@@ -140,6 +158,11 @@ function hasItem(bot, name, count = 1) {
   return countItem(bot, name) >= count;
 }
 
+function normalizeCraftName(itemName = '') {
+  const normalized = String(itemName).trim().replace(/\s+/g, '_').toLowerCase();
+  return CRAFT_ALIASES[normalized] || normalized;
+}
+
 function getTierInfoByName(name = '') {
   return MATERIAL_TIERS.find(t => name.startsWith(`${t.tier}_`)) || null;
 }
@@ -171,6 +194,20 @@ function getBestCraftableTier(bot, itemType, count = 1) {
   return null;
 }
 
+function getBestOwnedTieredItem(bot, itemType) {
+  let best = null;
+  for (const t of MATERIAL_TIERS) {
+    if (t.tier === 'netherite') continue;
+    const fullName = `${t.tier}_${itemType}`;
+    const item = findItemSlot(bot, fullName);
+    if (!item) continue;
+    if (!best || t.level > best.tier.level) {
+      best = { tier: t, item, fullName };
+    }
+  }
+  return best;
+}
+
 function trackTemporaryStation(bot, kind, position) {
   if (!position) return;
   if (!bot._temporaryStations) bot._temporaryStations = {};
@@ -193,9 +230,11 @@ async function cleanupTemporaryStation(bot, kind, goals, options = {}) {
   } catch {}
 
   try {
-    const tool = findBestTool(bot, block.name);
-    if (tool) await bot.equip(tool, 'hand').catch(() => {});
-    await bot.dig(block, true);
+    const digResult = await digSafely(bot, block, { requireDrops: true });
+    if (!digResult.success) {
+      if (!options.silent) console.log(`Temporary ${kind} cleanup skipped: ${digResult.reason}`);
+      return false;
+    }
     await collectDrops(bot, goals || require('mineflayer-pathfinder').goals, 250, { maxDistance: 10, maxItems: 8, passes: 2 });
     delete bot._temporaryStations[kind];
     return true;
@@ -464,12 +503,12 @@ async function ensureCraftingTable(bot, goals) {
         // If targetPos is occupied by a solid block, dig it first!
         if (targetBlock && targetBlock.name !== 'air' && targetBlock.name !== 'cave_air' && targetBlock.name !== 'water' && targetBlock.name !== 'lava') {
           console.log(`[Crafting] Target place block ${targetBlock.name} at ${targetPos} is solid. Digging it first...`);
-          const { findBestTool, sleep } = require('../utils');
-          const tool = findBestTool(bot, targetBlock.name);
-          if (tool) {
-            await bot.equip(tool, 'hand');
+          const { sleep } = require('../utils');
+          const digResult = await digSafely(bot, targetBlock, { requireDrops: true });
+          if (!digResult.success) {
+            console.log(`[Crafting] Refusing unsafe dig for ${targetBlock.name}: ${digResult.reason}`);
+            return null;
           }
-          await bot.dig(targetBlock);
           await sleep(500);
         }
 
@@ -562,7 +601,7 @@ async function executeCraftStep(bot, step, table) {
  */
 async function craft(bot, itemName, count = 1, options = {}) {
   const { silent = false } = options;
-  const normalized = itemName.replace(/\s+/g, '_').toLowerCase();
+  const normalized = normalizeCraftName(itemName);
 
   // Special: "best sword", "best pickaxe", etc.
   if (normalized.startsWith('best_')) {
@@ -630,14 +669,16 @@ async function craftBestTiered(bot, itemType, count = 1, options = {}) {
     return { success: false, crafted: null, steps: 0, reason: 'not tiered' };
   }
 
-  // Already have a good one?
-  for (const t of MATERIAL_TIERS) {
-    if (t.tier === 'netherite') continue;
-    const fullName = `${t.tier}_${itemType}`;
-    if (hasItem(bot, fullName)) {
-      if (!silent) bot.chat(`Already have ${fullName}!`);
-      return { success: true, crafted: fullName, steps: 0, reason: 'already owned' };
-    }
+  const owned = getBestOwnedTieredItem(bot, itemType);
+  const craftable = getBestCraftableTier(bot, itemType, count);
+  if (owned && (!craftable || owned.tier.level >= craftable.tier.level)) {
+    if (!silent) bot.chat(`Already have ${owned.fullName}!`);
+    return { success: true, crafted: owned.fullName, steps: 0, reason: 'already owned best' };
+  }
+
+  if (craftable) {
+    if (!silent) bot.chat(`Best available: ${craftable.fullName}`);
+    return await craft(bot, craftable.fullName, count, options);
   }
 
   // Try to craft from best tier downward
@@ -646,12 +687,17 @@ async function craftBestTiered(bot, itemType, count = 1, options = {}) {
     const fullName = `${t.tier}_${itemType}`;
     const steps = resolveDependencies(bot, fullName, count);
     if (steps) {
-      if (!silent) bot.chat(`🔨 Best available: ${fullName}`);
+      if (!silent) bot.chat(`Best available: ${fullName}`);
       return await craft(bot, fullName, count, options);
     }
   }
 
-  if (!silent) bot.chat(`Can't craft any ${itemType} — no materials available!`);
+  if (owned) {
+    if (!silent) bot.chat(`Using existing ${owned.fullName}.`);
+    return { success: true, crafted: owned.fullName, steps: 0, reason: 'owned fallback' };
+  }
+
+  if (!silent) bot.chat(`Can't craft any ${itemType} - no materials available!`);
   return { success: false, crafted: null, steps: 0, reason: 'no materials for any tier' };
 }
 
@@ -668,16 +714,12 @@ async function gearUp(bot, options = {}) {
   if (!silent) bot.chat('⚔️ Gearing up...');
 
   // 1. Best sword (weapon)
-  if (!findAnyOf(bot, MATERIAL_TIERS.filter(t => t.tier !== 'netherite').map(t => `${t.tier}_sword`))) {
-    const r = await craftBestTiered(bot, 'sword', 1, { silent: true });
-    if (r.success) results.push(r.crafted);
-  }
+  const sword = await craftBestTiered(bot, 'sword', 1, { silent: true });
+  if (sword.success) results.push(sword.crafted);
 
   // 2. Best pickaxe (essential tool)
-  if (!findAnyOf(bot, MATERIAL_TIERS.filter(t => t.tier !== 'netherite').map(t => `${t.tier}_pickaxe`))) {
-    const r = await craftBestTiered(bot, 'pickaxe', 1, { silent: true });
-    if (r.success) results.push(r.crafted);
-  }
+  const pickaxe = await craftBestTiered(bot, 'pickaxe', 1, { silent: true });
+  if (pickaxe.success) results.push(pickaxe.crafted);
 
   // 3. Shield
   if (!hasItem(bot, 'shield')) {
@@ -687,11 +729,8 @@ async function gearUp(bot, options = {}) {
 
   // 4. Armor (try chestplate first — most protection)
   for (const piece of ['chestplate', 'helmet', 'leggings', 'boots']) {
-    const existing = findAnyOf(bot, MATERIAL_TIERS.filter(t => t.tier !== 'netherite').map(t => `${t.tier}_${piece}`));
-    if (!existing) {
-      const r = await craftBestTiered(bot, piece, 1, { silent: true });
-      if (r.success) results.push(r.crafted);
-    }
+    const r = await craftBestTiered(bot, piece, 1, { silent: true });
+    if (r.success) results.push(r.crafted);
   }
 
   if (results.length > 0) {
@@ -709,6 +748,30 @@ async function gearUp(bot, options = {}) {
  * Try to craft food when hungry. Called by eat brain when no food available.
  * Tries: bread (3 wheat), cookies (2 wheat + cocoa), pumpkin pie, etc.
  */
+async function ensureCombatKit(bot, options = {}) {
+  const results = [];
+  const weapon = await ensureWeapon(bot);
+  if (weapon?.item?.name) results.push(weapon.item.name);
+
+  if (!hasItem(bot, 'shield')) {
+    const shield = await craft(bot, 'shield', 1, { silent: true });
+    if (shield.success) results.push('shield');
+  }
+
+  const armor = await ensureArmor(bot);
+  results.push(...armor);
+
+  const attackBrain = require('./attack');
+  await attackBrain.prepareCombatWeapon(bot);
+
+  const unique = [...new Set(results.filter(Boolean))];
+  if (!options.silent && unique.length > 0) {
+    bot.chat(`Combat kit ready: ${unique.join(', ')}`);
+  }
+
+  return unique;
+}
+
 async function craftFoodIfPossible(bot, options = {}) {
   const { silent = true } = options;
 
@@ -756,20 +819,24 @@ async function ensureWeapon(bot) {
   const attackBrain = require('./attack');
   const best = attackBrain.pickBestWeapon(bot);
   const craftableSword = getBestCraftableTier(bot, 'sword', 1);
+  const craftableAxe = getBestCraftableTier(bot, 'axe', 1);
+  const craftableWeapon = [craftableSword, craftableAxe]
+    .filter(Boolean)
+    .sort((a, b) => b.tier.level - a.tier.level)[0] || null;
   const currentTier = getTierInfoByName(best?.item?.name || '');
-  if (best && best.score > 5 && (!craftableSword || (currentTier && currentTier.level >= craftableSword.tier.level))) {
-    return best;
+  if (best && best.score > 5 && (!craftableWeapon || (currentTier && currentTier.level >= craftableWeapon.tier.level))) {
+    return await attackBrain.equipBestWeapon(bot);
   }
 
-  const result = craftableSword
-    ? await craft(bot, craftableSword.fullName, 1, { silent: true })
+  const result = craftableWeapon
+    ? await craft(bot, craftableWeapon.fullName, 1, { silent: true })
     : await craftBestTiered(bot, 'sword', 1, { silent: true });
   if (result.success) {
     console.log('Brain:Craft auto-crafted ' + result.crafted + ' for combat');
-    return attackBrain.pickBestWeapon(bot);
+    return await attackBrain.equipBestWeapon(bot);
   }
 
-  return best;
+  return best ? await attackBrain.equipBestWeapon(bot) : null;
 }
 
 /**
@@ -934,6 +1001,7 @@ module.exports = {
   resolveDependencies,
   // Integration
   gearUp,
+  ensureCombatKit,
   craftFoodIfPossible,
   ensureWeapon,
   ensureArmor,
@@ -946,6 +1014,7 @@ module.exports = {
   plankStatus,
   stickStatus,
   findBestTier,
+  getBestCraftableTier,
   // Reports
   craftReport,
   showMissingMaterials,

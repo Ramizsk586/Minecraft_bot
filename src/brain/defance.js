@@ -65,17 +65,9 @@ async function handleIncomingAttack(bot, source, options = {}) {
   // Auto-craft weapon if we don't have one
   try {
     const craftBrain = require('./craft');
-    await craftBrain.ensureWeapon(bot);
+    await craftBrain.ensureCombatKit(bot, { silent: true });
   } catch (err) {
-    console.log('Brain:Defance craft-weapon failed: ' + err.message);
-  }
-
-  // Auto-equip armor
-  try {
-    const craftBrain = require('./craft');
-    await craftBrain.ensureArmor(bot);
-  } catch (err) {
-    console.log('Brain:Defance equip-armor failed: ' + err.message);
+    console.log('Brain:Defance combat-kit failed: ' + err.message);
   }
 
   // Eat if low on food

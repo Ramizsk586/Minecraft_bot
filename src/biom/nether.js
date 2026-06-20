@@ -40,6 +40,32 @@ module.exports = {
 
   usefulItems: ['fire_resistance_potion', 'gold_ingot', 'ender_pearl', 'water_bucket'],
 
+  hazards: ['bed_explosion', 'lava', 'ghast', 'piglin', 'hoglin', 'no_water', 'fire'],
+
+  resourceTargets: {
+    immediate: ['safe_platform', 'crimson_stem', 'warped_stem', 'blackstone'],
+    tools: ['blackstone', 'netherrack', 'nether_quartz_ore'],
+    food: ['hoglin', 'mushroom_stew', 'stored_food'],
+    safety: ['golden_boots', 'fire_resistance_potion', 'cobblestone', 'blackstone'],
+  },
+
+  relocation: {
+    enabled: true,
+    trigger: 'basalt_delta_or_lava_lake',
+    searchFor: ['crimson_forest', 'warped_forest', 'nether_wastes', 'portal'],
+    maxLocalSearchRadius: 48,
+    travelRadius: 160,
+  },
+
+  survivalPriorities: [
+    { action: 'avoid', target: 'bed_use', urgency: 100, reason: 'beds explode in the Nether' },
+    { action: 'avoid', target: 'lava', urgency: 98, reason: 'water cannot save the bot here' },
+    { action: 'find_wood', target: 'crimson_or_warped_stem', urgency: 90, reason: 'fungal stems replace overworld trees' },
+    { action: 'mine', target: 'blackstone', urgency: 82, reason: 'stone-tool equivalent and safer shelter block' },
+    { action: 'equip', target: 'gold_armor', urgency: 72, reason: 'reduces piglin aggression' },
+    { action: 'relocate', target: 'safer_forest_or_portal', urgency: 66, reason: 'basalt deltas and lava lakes are poor starts' },
+  ],
+
   survivalSteps: [
     '⚠️ DO NOT place or sleep in a bed — beds EXPLODE in the Nether!',
     'Find a Crimson Forest for crimson_stem or Warped Forest for warped_stem',

@@ -47,12 +47,12 @@ async function ensureFurnacePlaced(bot) {
     // If there's a block in the way, dig it!
     if (targetBlock && targetBlock.name !== 'air' && targetBlock.name !== 'cave_air' && targetBlock.name !== 'water' && targetBlock.name !== 'lava') {
       console.log(`[Cooking] Target place block ${targetBlock.name} at ${targetPos} is solid. Digging it first...`);
-      const { findBestTool } = require('../utils');
-      const tool = findBestTool(bot, targetBlock.name);
-      if (tool) {
-        await bot.equip(tool, 'hand');
+      const { digSafely } = require('../utils');
+      const digResult = await digSafely(bot, targetBlock, { requireDrops: true });
+      if (!digResult.success) {
+        console.log(`[Cooking] Refusing unsafe dig for ${targetBlock.name}: ${digResult.reason}`);
+        return null;
       }
-      await bot.dig(targetBlock);
       await sleep(500);
     }
 
@@ -89,12 +89,12 @@ async function collectTemporaryFurnace(bot) {
   } catch {}
 
   try {
-    const { findBestTool } = require('../utils');
-    const tool = findBestTool(bot, furnaceBlock.name);
-    if (tool) {
-      await bot.equip(tool, 'hand').catch(() => {});
+    const { digSafely } = require('../utils');
+    const digResult = await digSafely(bot, furnaceBlock, { requireDrops: true });
+    if (!digResult.success) {
+      console.log(`[Cooking] Refusing unsafe furnace pickup: ${digResult.reason}`);
+      return false;
     }
-    await bot.dig(furnaceBlock, true);
     const { goals } = require('mineflayer-pathfinder');
     await collectDrops(bot, goals, 250, { maxDistance: 10, maxItems: 8, passes: 2 });
   } catch (err) {

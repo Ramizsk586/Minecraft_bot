@@ -1,7 +1,7 @@
 // ─── Farming & Food Automation ───────────────────────────────────────────────
 
 const { Vec3 } = require('vec3');
-const { sleep, findBestFood, collectDrops } = require('../utils');
+const { sleep, findBestFood, collectDrops, digSafely } = require('../utils');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -129,7 +129,11 @@ function register(bot, goals) {
             await navigateNear(bot, goals, waterPos, 3);
             const waterBlock = bot.blockAt(waterPos);
             if (waterBlock && waterBlock.name !== 'air') {
-              await bot.dig(waterBlock);
+              const digResult = await digSafely(bot, waterBlock, { requireDrops: true });
+              if (!digResult.success) {
+                console.log(`[Farming] Skipped unsafe water-channel dig for ${waterBlock.name}: ${digResult.reason}`);
+                continue;
+              }
               await sleep(200);
               // Place water
               const bucket = findItemByName(bot, 'water_bucket');

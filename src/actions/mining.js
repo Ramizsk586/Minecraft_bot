@@ -1,7 +1,7 @@
 // ─── Smart Mining & Wood Gathering ──────────────────────────────────────────
 
 const { Vec3 } = require('vec3');
-const { sleep, findBestTool, collectDrops } = require('../utils');
+const { sleep, findBestTool, collectDrops, getSafeMiningCheck, digSafely } = require('../utils');
 const miningRules = require('../brain/miningRules');
 const craftBrain = require('../brain/craft');
 
@@ -100,12 +100,18 @@ async function holdDigBlock(bot, goals, block) {
 
   const freshBlock = bot.blockAt(block.position);
   if (!freshBlock || freshBlock.name === 'air') return false;
+  const tool = findBestTool(bot, freshBlock.name);
+  const check = getSafeMiningCheck(bot, freshBlock.name, tool, { requireDrops: true });
+  if (!check.canMine || !check.willDrop) {
+    console.log(`Skipping unsafe dig for ${freshBlock.name}: ${check.reason}`);
+    return false;
+  }
 
   try {
     await bot.lookAt(freshBlock.position.offset(0.5, 0.5, 0.5), true);
     await sleep(100);
-    await bot.dig(freshBlock, true);
-    return true;
+    const result = await digSafely(bot, freshBlock, { requireDrops: true });
+    return result.success;
   } catch (err) {
     if (/goal was changed|digging aborted/i.test(err.message || '')) {
       return false;
@@ -210,6 +216,11 @@ function register(bot, goals) {
   async function ensureMiningTool(bot, blockName) {
     const blockReq = miningRules.getBlockRequirement(blockName);
     const toolType = blockReq ? blockReq.tool : getToolTypeForBlock(blockName);
+    const handCheck = miningRules.checkToolForBlock(null, blockName);
+    if (!handCheck.canMine) {
+      bot.chat(`Cannot mine ${blockName}: ${handCheck.reason}.`);
+      return null;
+    }
 
     // Equip best tool in inventory
     let currentTool = await equipBestTool(bot, blockName);
@@ -218,12 +229,10 @@ function register(bot, goals) {
     currentTool = await tryUpgradeTool(toolType, currentTool);
 
     // Enforce drop requirements
-    if (blockReq) {
-      const check = miningRules.checkToolForBlock(currentTool, blockName);
-      if (!check.willDrop) {
-        bot.chat(`⚠️ Cannot mine ${blockName} without a suitable tool (${check.reason}).`);
-        return null;
-      }
+    const check = miningRules.checkToolForBlock(currentTool, blockName);
+    if (!check.willDrop) {
+      bot.chat(`Cannot mine ${blockName} safely (${check.reason}).`);
+      return null;
     }
 
     return currentTool;
@@ -370,6 +379,7 @@ function register(bot, goals) {
   function getToolTypeForBlock(blockName) {
     if (blockName.includes('log') || blockName.includes('planks') || blockName.includes('wood')) return 'axe';
     if (['dirt', 'grass_block', 'sand', 'gravel', 'clay', 'mud'].includes(blockName)) return 'shovel';
+    if (blockName.includes('leaves') || blockName.includes('vine') || blockName === 'cobweb') return 'shears';
     return 'pickaxe'; // Default
   }
 

@@ -1,6 +1,6 @@
 const { navigateToPosition, lookAtPosition } = require('./searchNavigation');
-const { selectBestTool, isBlockSafe } = require('./blockCollectionHelpers');
-const { collectDrops } = require('../../utils');
+const { isBlockSafe } = require('./blockCollectionHelpers');
+const { collectDrops, digSafely } = require('../../utils');
 const config = require('./blockCollectionConfig');
 const { goals } = require('mineflayer-pathfinder');
 
@@ -39,19 +39,15 @@ async function findAndCollectBlock(bot, blockName, count = 1) {
     const reached = await navigateToPosition(bot, block.position, 3);
     if (!reached) continue;
 
-    // Equip best tool
-    const tool = selectBestTool(bot, blockName);
-    if (tool) {
-      try {
-        await bot.equip(tool, 'hand');
-      } catch {}
-    }
-
     // Break
     try {
       await lookAtPosition(bot, block.position.offset(0.5, 0.5, 0.5));
-      await bot.dig(block);
-      minedCount++;
+      const digResult = await digSafely(bot, block, { requireDrops: true });
+      if (digResult.success) {
+        minedCount++;
+      } else {
+        console.log(`[BlockCollection] Skipped unsafe dig for ${block.name}: ${digResult.reason}`);
+      }
     } catch (err) {
       console.log(`[BlockCollection] Dig failed: ${err.message}`);
     }

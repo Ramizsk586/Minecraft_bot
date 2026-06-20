@@ -37,6 +37,32 @@ module.exports = {
 
   usefulItems: ['leather_boots', 'torch', 'sweet_berries', 'fishing_rod'],
 
+  hazards: ['powder_snow', 'stray', 'freezing', 'thin_food_supply', 'ice_water'],
+
+  resourceTargets: {
+    immediate: ['spruce_log', 'sweet_berries', 'stone'],
+    tools: ['cobblestone', 'coal_ore', 'iron_ore'],
+    food: ['sweet_berries', 'salmon', 'cod', 'rabbit', 'cow'],
+    safety: ['leather_boots', 'torch', 'spruce_planks', 'cobblestone'],
+  },
+
+  relocation: {
+    enabled: true,
+    trigger: 'powder_snow_or_no_spruce',
+    searchFor: ['taiga', 'river', 'plains', 'village'],
+    maxLocalSearchRadius: 72,
+    travelRadius: 160,
+  },
+
+  survivalPriorities: [
+    { action: 'avoid', target: 'powder_snow', urgency: 100, reason: 'freezing can kill early bots quickly' },
+    { action: 'find_wood', target: 'spruce_log', urgency: 94, reason: 'cold biomes usually provide spruce' },
+    { action: 'craft', target: 'wooden_pickaxe', urgency: 86, reason: 'start wooden-first progression' },
+    { action: 'find_food', target: 'sweet_berries_or_fish', urgency: 76, reason: 'passive mobs are less reliable' },
+    { action: 'craft', target: 'leather_boots', urgency: 62, reason: 'safe movement over powder snow' },
+    { action: 'mine', target: 'coal_ore', urgency: 58, reason: 'torches prevent snow/cave threat spirals' },
+  ],
+
   survivalSteps: [
     'Chop nearby spruce trees (most common tree in taiga/snowy biomes)',
     'Craft planks → crafting table → wooden pickaxe',

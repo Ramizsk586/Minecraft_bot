@@ -1,5 +1,9 @@
 // ─── Enhanced World State ─────────────────────────────────────────────────────
 
+'use strict';
+
+const biom = require('./biom');
+
 /**
  * Gather comprehensive world state for the AI decision engine.
  */
@@ -27,7 +31,13 @@ function getWorldState(bot) {
   const isDay = timeOfDay < 12000;
 
   // Biome
-  const biome = bot.blockAt(pos)?.biome?.name || 'unknown';
+  const biomeEvidence = biom.getBiomeEvidence(bot);
+  const biomeClimate = [
+    biomeEvidence.metadata.temperature != null ? `temp=${biomeEvidence.metadata.temperature}` : null,
+    biomeEvidence.metadata.humidity != null ? `humidity=${biomeEvidence.metadata.humidity}` : null,
+    biomeEvidence.metadata.precipitation ? `precip=${biomeEvidence.metadata.precipitation}` : null,
+  ].filter(Boolean).join(', ');
+  const biome = `${biomeEvidence.biomeName} -> ${biomeEvidence.finalPlan} (${biomeEvidence.source}, ${biomeEvidence.confidence}% confidence${biomeClimate ? `, ${biomeClimate}` : ''}; ${biomeEvidence.reason})`;
 
   // Nearby entities
   const nearbyEntities = Object.values(bot.entities)
