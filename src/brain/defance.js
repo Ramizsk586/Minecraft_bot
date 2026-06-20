@@ -6,6 +6,7 @@ const attackBrain = require('./attack');
 const libraryData = require('../library/data');
 
 let _defanceState = null;
+const DEFANCE_TRIGGER_COOLDOWN_MS = 2500;
 
 function isLikelyThreat(bot, entity, options = {}) {
   if (!attackBrain.isAttackableEntity(bot, entity, options)) return false;
@@ -43,8 +44,17 @@ async function handleIncomingAttack(bot, source, options = {}) {
   const attacker = selectAttacker(bot, source, options);
   if (!attacker) return;
 
+  const now = Date.now();
+  const sameAttacker = _defanceState.lastAttacker?.id === attacker.id;
+  const recentlyHandled = now - (_defanceState.lastHandledAt || 0) < DEFANCE_TRIGGER_COOLDOWN_MS;
+
+  if (sameAttacker && recentlyHandled) {
+    return;
+  }
+
   _defanceState.lastAttacker = attacker;
   _defanceState.lastHitAt = Date.now();
+  _defanceState.lastHandledAt = now;
 
   // Auto-craft weapon if we don't have one
   try {
@@ -121,6 +131,7 @@ function startAutoDefance(bot, options = {}) {
     enabled: true,
     lastHealth: bot.health,
     lastHitAt: 0,
+    lastHandledAt: 0,
     lastAttacker: null,
     options,
     onHealth: () => onHealth(bot, options),

@@ -4,7 +4,7 @@
 
 const { goals } = require('mineflayer-pathfinder');
 const { Vec3 } = require('vec3');
-const { sleep, findBestTool } = require('../utils');
+const { sleep, findBestTool, collectDrops } = require('../utils');
 
 const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
@@ -167,6 +167,43 @@ function findConnectedLogs(bot, rootBlock) {
   return found.sort((a, b) => a.position.y - b.position.y);
 }
 
+function findWholeTree(bot, rootBlock) {
+  if (!rootBlock) return [];
+
+  const rootName = rootBlock.name;
+  const visited = new Set();
+  const queue = [rootBlock.position.clone()];
+  const found = [];
+
+  while (queue.length > 0 && found.length < 96) {
+    const pos = queue.shift();
+    const key = `${pos.x},${pos.y},${pos.z}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    const block = bot.blockAt(pos);
+    if (!block || block.name !== rootName) continue;
+    found.push(block);
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (dx === 0 && dy === 0 && dz === 0) continue;
+          if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 2) continue;
+          queue.push(pos.offset(dx, dy, dz));
+        }
+      }
+    }
+  }
+
+  return found.sort((a, b) => {
+    if (a.position.y !== b.position.y) return a.position.y - b.position.y;
+    const da = a.position.distanceTo(rootBlock.position);
+    const db = b.position.distanceTo(rootBlock.position);
+    return da - db;
+  });
+}
+
 function canMineQuickly(bot, block) {
   if (!block) return false;
   if (SOFT_BLOCKS.has(block.name)) return true;
@@ -191,6 +228,28 @@ async function equipToolFor(bot, blockName) {
     return tool;
   } catch {
     return null;
+  }
+}
+
+async function holdDigBlock(bot, block) {
+  if (!block) return false;
+
+  try {
+    const distance = bot.entity.position.distanceTo(block.position.offset(0.5, 0.5, 0.5));
+    if (distance > 4.5 || !bot.canDigBlock(block)) {
+      await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 3));
+    }
+
+    const fresh = bot.blockAt(block.position);
+    if (!fresh || fresh.name === 'air' || !bot.canDigBlock(fresh)) return false;
+
+    await bot.lookAt(fresh.position.offset(0.5, 0.5, 0.5), true);
+    await sleep(100);
+    await bot.dig(fresh, true);
+    return true;
+  } catch (err) {
+    console.log(`Brain:Mine holdDigBlock failed: ${err.message}`);
+    return false;
   }
 }
 
@@ -286,7 +345,7 @@ async function cutTreeSafely(bot, options = {}) {
     return { success: false, reason: 'no tree found' };
   }
 
-  const logs = findConnectedLogs(bot, root);
+  const logs = findWholeTree(bot, root);
   if (logs.length === 0) {
     return { success: false, reason: 'no connected logs' };
   }
@@ -309,13 +368,18 @@ async function cutTreeSafely(bot, options = {}) {
 
     try {
       await equipToolFor(bot, fresh.name);
-      await bot.dig(fresh);
-      chopped++;
+      const dug = await holdDigBlock(bot, fresh);
+      if (dug) {
+        chopped++;
+        await collectDrops(bot, goals, 250, { maxDistance: 14, maxItems: 8, passes: 1 });
+      }
       await sleep(150);
     } catch (err) {
       console.log(`Brain:Mine chop error: ${err.message}`);
     }
   }
+
+  await collectDrops(bot, goals, 500, { maxDistance: 18, maxItems: 20, passes: 3 });
 
   return { success: chopped > 0, reason: chopped > 0 ? 'tree chopped' : 'nothing chopped', chopped };
 }
@@ -334,10 +398,10 @@ async function mineSoftTargets(bot, options = {}) {
 
     try {
       await equipToolFor(bot, block.name);
-      await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 3));
       const fresh = bot.blockAt(block.position);
       if (fresh) {
-        await bot.dig(fresh);
+        const dug = await holdDigBlock(bot, fresh);
+        if (!dug) continue;
         return { success: true, block: fresh.name };
       }
     } catch (err) {

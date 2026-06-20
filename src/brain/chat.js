@@ -227,6 +227,28 @@ const CHAT_CATEGORIES = [
   }
 ];
 
+const CATEGORY_COOLDOWNS_MS = {
+  greetings: 12000,
+  status: 8000,
+  compliments: 12000,
+  farewell: 12000,
+  jokes_lore: 15000,
+  affirmation: 6000,
+  identity_defense: 12000,
+  minecraft_questions: 10000,
+};
+
+function ensureChatState(bot) {
+  if (!bot._chatBrainState) {
+    bot._chatBrainState = {
+      lastReplyAt: 0,
+      lastReplyText: '',
+      categoryTimes: {},
+    };
+  }
+  return bot._chatBrainState;
+}
+
 function interpolate(template, bot, username) {
   const health = bot.health ? Math.round(bot.health) : 20;
   const food = bot.food !== undefined ? bot.food : 20;
@@ -239,15 +261,57 @@ function interpolate(template, bot, username) {
     .replace(/{task}/g, task);
 }
 
+function pickResponse(bot, categoryName, username) {
+  const state = ensureChatState(bot);
+  const responsesList = RESPONSES[categoryName];
+  if (!responsesList || responsesList.length === 0) return null;
+
+  const pool = responsesList.slice();
+  let template = pool[Math.floor(Math.random() * pool.length)];
+  let reply = interpolate(template, bot, username);
+
+  if (pool.length > 1 && reply === state.lastReplyText) {
+    const alternatives = pool.filter(entry => interpolate(entry, bot, username) !== state.lastReplyText);
+    if (alternatives.length > 0) {
+      template = alternatives[Math.floor(Math.random() * alternatives.length)];
+      reply = interpolate(template, bot, username);
+    }
+  }
+
+  return reply;
+}
+
+function canReply(bot, categoryName) {
+  const state = ensureChatState(bot);
+  const now = Date.now();
+  const categoryCooldown = CATEGORY_COOLDOWNS_MS[categoryName] || 8000;
+  const lastCategoryAt = state.categoryTimes[categoryName] || 0;
+
+  if (now - state.lastReplyAt < 2500) return false;
+  if (now - lastCategoryAt < categoryCooldown) return false;
+  return true;
+}
+
+function rememberReply(bot, categoryName, reply) {
+  const state = ensureChatState(bot);
+  const now = Date.now();
+  state.lastReplyAt = now;
+  state.lastReplyText = reply;
+  state.categoryTimes[categoryName] = now;
+}
+
 async function tryHandleChat(bot, username, message) {
   const trimmed = message.trim();
   
   for (const cat of CHAT_CATEGORIES) {
     for (const pattern of cat.patterns) {
       if (pattern.test(trimmed)) {
-        const responsesList = RESPONSES[cat.name];
-        const randomTemplate = responsesList[Math.floor(Math.random() * responsesList.length)];
-        const reply = interpolate(randomTemplate, bot, username);
+        if (!canReply(bot, cat.name)) {
+          return true;
+        }
+        const reply = pickResponse(bot, cat.name, username);
+        if (!reply) return true;
+        rememberReply(bot, cat.name, reply);
         bot.chat(reply);
         return true;
       }

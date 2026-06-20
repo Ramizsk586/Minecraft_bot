@@ -118,20 +118,32 @@ function findBestFood(bot) {
 /**
  * Wait briefly then collect nearby dropped items by walking to them.
  */
-async function collectDrops(bot, goals, waitMs = 600) {
+async function collectDrops(bot, goals, waitMs = 600, options = {}) {
+  const {
+    maxDistance = 12,
+    maxItems = 16,
+    passes = 2,
+  } = options;
+
   await sleep(waitMs);
-  const nearby = Object.values(bot.entities).filter(
-    e => e.name === 'item' && e.position.distanceTo(bot.entity.position) < 8
-  );
-  for (const item of nearby.slice(0, 10)) {
-    try {
-      await bot.pathfinder.goto(new goals.GoalNear(
-        item.position.x, item.position.y, item.position.z, 1
-      ));
-    } catch {
-      // item may have been picked up already
+
+  for (let pass = 0; pass < passes; pass++) {
+    const nearby = Object.values(bot.entities)
+      .filter(e => e.name === 'item' && e.position.distanceTo(bot.entity.position) < maxDistance)
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position));
+
+    if (nearby.length === 0) break;
+
+    for (const item of nearby.slice(0, maxItems)) {
+      try {
+        await bot.pathfinder.goto(new goals.GoalNear(
+          item.position.x, item.position.y, item.position.z, 1
+        ));
+      } catch {
+        // item may have been picked up already
+      }
+      await sleep(200);
     }
-    await sleep(200);
   }
 }
 

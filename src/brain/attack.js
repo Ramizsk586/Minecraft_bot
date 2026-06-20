@@ -7,6 +7,7 @@ const { sleep } = require('../utils');
 const ATTACK_TICK_MS = 550;
 const TAUNT_COOLDOWN_MS = 4500;
 const COMBAT_TIMEOUT_MS = 20000;
+const COMBAT_CHAT_COOLDOWN_MS = 3000;
 
 const HOSTILE_MOBS = [
   'zombie', 'skeleton', 'creeper', 'spider', 'cave_spider', 'drowned',
@@ -174,6 +175,25 @@ function pickFightLine(bucket, enemyName) {
   return line.replace(/\{enemy\}/g, enemyName);
 }
 
+function canSendCombatLine(bot, key, cooldownMs = COMBAT_CHAT_COOLDOWN_MS) {
+  if (!bot._combatChatState) {
+    bot._combatChatState = {};
+  }
+
+  const now = Date.now();
+  const lastAt = bot._combatChatState[key] || 0;
+  if (now - lastAt < cooldownMs) return false;
+  bot._combatChatState[key] = now;
+  return true;
+}
+
+function sendCombatLine(bot, key, message, cooldownMs = COMBAT_CHAT_COOLDOWN_MS) {
+  if (!message) return false;
+  if (!canSendCombatLine(bot, key, cooldownMs)) return false;
+  bot.chat(message);
+  return true;
+}
+
 function clearCombatState(bot) {
   if (!bot._combatState) return;
 
@@ -288,7 +308,7 @@ async function startAttack(bot, target, options = {}) {
   };
 
   bot._combatState = combatState;
-  bot.chat(pickFightLine('opening', enemyName));
+  sendCombatLine(bot, `opening:${enemyName}`, pickFightLine('opening', enemyName), 5000);
 
   let currentTarget = target;
 
@@ -315,7 +335,7 @@ async function startAttack(bot, target, options = {}) {
 
     // Low-health retreat logic
     if (bot.health <= 7) {
-      bot.chat("⚠️ Low health! Retreating to recover!");
+      sendCombatLine(bot, 'retreat:low_health', 'Low health. Falling back to recover.', 6000);
       const enemyPos = activeTarget.position.clone();
       stopAttack(bot, { reason: 'retreat' });
 
@@ -354,7 +374,7 @@ async function startAttack(bot, target, options = {}) {
 
     if (!weaponData) {
       if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
-        bot.chat(`Fists only, ${state.enemyName}. You still lose.`);
+        sendCombatLine(bot, `fists:${state.enemyName}`, `No weapon ready, ${state.enemyName}. Still fighting.`, TAUNT_COOLDOWN_MS);
         state.lastTauntAt = Date.now();
       }
       await strikeMelee(bot, activeTarget).catch(() => {});
@@ -377,7 +397,7 @@ async function startAttack(bot, target, options = {}) {
 
     if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
       const bucket = bot.health <= 8 ? 'lowHealth' : 'pressure';
-      bot.chat(pickFightLine(bucket, state.enemyName));
+      sendCombatLine(bot, `${bucket}:${state.enemyName}`, pickFightLine(bucket, state.enemyName), TAUNT_COOLDOWN_MS);
       state.lastTauntAt = Date.now();
     }
   }
@@ -409,7 +429,7 @@ function stopAttack(bot, options = {}) {
   if (!options.silent) {
     const bucket = options.reason === 'finish' ? 'finish' : options.reason === 'retreat' ? 'retreat' : null;
     if (bucket) {
-      bot.chat(pickFightLine(bucket, enemyName));
+      sendCombatLine(bot, `${bucket}:${enemyName}`, pickFightLine(bucket, enemyName), 3500);
     }
   }
 

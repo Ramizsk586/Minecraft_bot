@@ -9,6 +9,7 @@ const mineBrain = require('./mine');
 const surviveBrain = require('./survive');
 const chatBrain = require('./chat');
 const stuckBrain = require('./stuck');
+const swimBrain = require('./swim');
 
 let _brainBot = null;
 let _brainOptions = {};
@@ -438,6 +439,12 @@ function init(bot, options = {}) {
   console.log('Brain initializing...');
 
   bot.isStuckRecovering = false;
+  bot._swimState = {
+    active: false,
+    target: null,
+    startedAt: 0,
+    emergency: false,
+  };
   bot.on('stuckRecovered', reason => {
     bot.isStuckRecovering = false;
     console.log(`Brain:Stuck recovered from ${reason}`);
@@ -470,6 +477,9 @@ function shutdown() {
   surviveBrain.stopAutonomy();
   stuckBrain.stopMonitoring();
   if (_brainBot) {
+    swimBrain.clearSwimState(_brainBot);
+  }
+  if (_brainBot) {
     defanceBrain.stopAutoDefance(_brainBot);
     _brainBot.isStuckRecovering = false;
   }
@@ -490,4 +500,5 @@ module.exports = {
   survive: surviveBrain,
   chat: chatBrain,
   stuck: stuckBrain,
+  swim: swimBrain,
 };

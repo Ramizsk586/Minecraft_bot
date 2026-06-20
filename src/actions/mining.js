@@ -61,6 +61,44 @@ async function equipBestTool(bot, blockName) {
   return tool;
 }
 
+async function moveIntoDigRange(bot, goals, block) {
+  if (!block) return false;
+
+  const distance = bot.entity.position.distanceTo(block.position.offset(0.5, 0.5, 0.5));
+  if (distance <= 4.5 && bot.canDigBlock(block)) {
+    return true;
+  }
+
+  try {
+    await bot.pathfinder.goto(
+      new goals.GoalNear(block.position.x, block.position.y, block.position.z, 3)
+    );
+  } catch {}
+
+  const refreshed = bot.blockAt(block.position);
+  return !!refreshed && bot.canDigBlock(refreshed);
+}
+
+async function holdDigBlock(bot, goals, block) {
+  if (!block) return false;
+
+  const reachable = await moveIntoDigRange(bot, goals, block);
+  if (!reachable) return false;
+
+  const freshBlock = bot.blockAt(block.position);
+  if (!freshBlock || freshBlock.name === 'air') return false;
+
+  try {
+    await bot.lookAt(freshBlock.position.offset(0.5, 0.5, 0.5), true);
+    await sleep(100);
+    await bot.dig(freshBlock, true);
+    return true;
+  } catch (err) {
+    console.log(`holdDigBlock failed for ${freshBlock.name}: ${err.message}`);
+    return false;
+  }
+}
+
 /**
  * Find all connected logs of the same type going upward from `basePos`.
  * Returns an ordered array of Block references from bottom to top.
@@ -75,6 +113,43 @@ function findTreeTrunk(bot, basePos, logIdSet) {
     pos = pos.offset(0, 1, 0);
   }
   return trunk;
+}
+
+function findWholeTree(bot, rootBlock) {
+  if (!rootBlock) return [];
+
+  const rootName = rootBlock.name;
+  const visited = new Set();
+  const queue = [rootBlock.position.clone()];
+  const found = [];
+
+  while (queue.length > 0 && found.length < 96) {
+    const pos = queue.shift();
+    const key = `${pos.x},${pos.y},${pos.z}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    const block = bot.blockAt(pos);
+    if (!block || block.name !== rootName) continue;
+    found.push(block);
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (dx === 0 && dy === 0 && dz === 0) continue;
+          if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 2) continue;
+          queue.push(pos.offset(dx, dy, dz));
+        }
+      }
+    }
+  }
+
+  return found.sort((a, b) => {
+    if (a.position.y !== b.position.y) return a.position.y - b.position.y;
+    const da = a.position.distanceTo(rootBlock.position);
+    const db = b.position.distanceTo(rootBlock.position);
+    return da - db;
+  });
 }
 
 // ─── Module Registration ────────────────────────────────────────────────────
@@ -105,18 +180,6 @@ function register(bot, goals) {
         break;
       }
 
-      // Navigate close to the block
-      try {
-        await bot.pathfinder.goto(
-          new goals.GoalNear(block.position.x, block.position.y, block.position.z, 4)
-        );
-      } catch (err) {
-        console.log(`Pathfinder error going to ${blockName}: ${err.message}`);
-        bot.chat(`Can't reach a ${blockName}, skipping...`);
-        await sleep(500);
-        continue;
-      }
-
       // Re-check tool — it may have broken
       if (currentTool && (!bot.heldItem || bot.heldItem.name !== currentTool.name)) {
         console.log('Tool appears to have changed, re-equipping...');
@@ -126,16 +189,11 @@ function register(bot, goals) {
         }
       }
 
-      // Dig
-      try {
-        // Re-fetch the block at the position in case it changed
-        const freshBlock = bot.blockAt(block.position);
-        if (freshBlock && freshBlock.type === id) {
-          await bot.dig(freshBlock);
-          mined++;
-        }
-      } catch (err) {
-        console.log(`Dig error: ${err.message}`);
+      const dug = await holdDigBlock(bot, goals, block);
+      if (dug) {
+        mined++;
+      } else {
+        console.log(`Dig error: could not break ${blockName} at ${block.position}`);
         await sleep(300);
         continue;
       }
@@ -208,7 +266,7 @@ function register(bot, goals) {
         const feetBlock = bot.blockAt(feetPos);
         if (feetBlock && feetBlock.type !== 0) { // 0 = air
           await equipBestTool(bot, feetBlock.name);
-          await bot.dig(feetBlock);
+          await holdDigBlock(bot, goals, feetBlock);
         }
       } catch (err) {
         console.log(`Dig feet error step ${step}: ${err.message}`);
@@ -219,7 +277,7 @@ function register(bot, goals) {
         const headBlock = bot.blockAt(headPos);
         if (headBlock && headBlock.type !== 0) {
           await equipBestTool(bot, headBlock.name);
-          await bot.dig(headBlock);
+          await holdDigBlock(bot, goals, headBlock);
         }
       } catch (err) {
         console.log(`Dig head error step ${step}: ${err.message}`);
@@ -246,7 +304,7 @@ function register(bot, goals) {
               try {
                 const freshOre = bot.blockAt(wallPos);
                 if (freshOre && oreIdSet.has(freshOre.type)) {
-                  await bot.dig(freshOre);
+                  await holdDigBlock(bot, goals, freshOre);
                   oresFound[oreName] = (oresFound[oreName] || 0) + 1;
                 }
               } catch (err) {
@@ -347,15 +405,15 @@ function register(bot, goals) {
       }
     }
 
-    // Find full trunk going upward
-    const trunk = findTreeTrunk(bot, basePos, logIdSet);
-    if (trunk.length === 0) {
-      bot.chat("Couldn't identify the tree trunk.");
+    const rootBlock = bot.blockAt(basePos);
+    const treeLogs = findWholeTree(bot, rootBlock);
+    if (treeLogs.length === 0) {
+      bot.chat("Couldn't identify the full tree.");
       return;
     }
 
-    const logType = trunk[0].name;
-    bot.chat(`Found a ${logType.replace('_log', '')} tree (${trunk.length} logs). Chopping...`);
+    const logType = treeLogs[0].name;
+    bot.chat(`Found a ${logType.replace('_log', '')} tree (${treeLogs.length} logs). Chopping it completely...`);
 
     // Navigate to base
     try {
@@ -372,12 +430,14 @@ function register(bot, goals) {
     let chopped = 0;
 
     // Chop from bottom to top
-    for (const logBlock of trunk) {
+    for (const logBlock of treeLogs) {
       try {
         const fresh = bot.blockAt(logBlock.position);
         if (fresh && logIdSet.has(fresh.type)) {
-          await bot.dig(fresh);
+          const dug = await holdDigBlock(bot, goals, fresh);
+          if (!dug) continue;
           chopped++;
+          await collectDrops(bot, goals, 250, { maxDistance: 14, maxItems: 8, passes: 1 });
         }
       } catch (err) {
         console.log(`Chop error: ${err.message}`);
@@ -385,11 +445,11 @@ function register(bot, goals) {
     }
 
     // Collect all drops (logs, saplings, apples)
-    await collectDrops(bot, goals);
+    await collectDrops(bot, goals, 500, { maxDistance: 18, maxItems: 20, passes: 3 });
 
     bot.chat(`Chopped ${chopped} ${logType} from the tree.`);
 
-    return { basePos, logType, chopped };
+    return { basePos, logType, chopped, positions: treeLogs.map(block => block.position.clone()) };
   }
 
   // ── gather_wood ─────────────────────────────────────────────────────────
@@ -403,7 +463,6 @@ function register(bot, goals) {
     let treesChopped = 0;
 
     for (let i = 0; i < treeCount; i++) {
-      // Reuse chopTree logic
       const result = await chopTree({});
 
       if (!result) {
@@ -446,7 +505,7 @@ function register(bot, goals) {
       }
 
       // Collect remaining drops between trees
-      await collectDrops(bot, goals);
+      await collectDrops(bot, goals, 500, { maxDistance: 18, maxItems: 20, passes: 3 });
 
       // Small delay between trees
       await sleep(500);

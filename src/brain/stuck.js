@@ -214,6 +214,19 @@ function checkInOpenPit(bot) {
  * moved more than LOOP_DISPLACEMENT_MIN blocks in LOOP_DETECT_TICKS ticks.
  */
 function checkPathfinderLoop(bot) {
+  const currentTask = String(bot._currentTask || '');
+  const diggingTarget = bot.targetDigBlock || null;
+  const isMiningTask =
+    currentTask.includes('mine') ||
+    currentTask.includes('gathering_dirt') ||
+    currentTask.includes('chop_tree') ||
+    currentTask.includes('gather_wood') ||
+    currentTask.includes('strip_mine');
+
+  // Mining often has low displacement while the mouse button is intentionally held.
+  // Treat that as valid work, not a pathfinder loop.
+  if (diggingTarget || isMiningTask) return false;
+
   if (_posHistory.length < POS_HISTORY_LEN) return false;
   const oldest = _posHistory[0];
   const newest = _posHistory[_posHistory.length - 1];
@@ -676,6 +689,12 @@ function updatePositionHistory(bot) {
 
 async function watchdogTick() {
   if (!_bot || _isRecovering) return;
+
+  if (_bot.targetDigBlock) {
+    updatePositionHistory(_bot);
+    _retryCount = 0;
+    return;
+  }
 
   updatePositionHistory(_bot);
 

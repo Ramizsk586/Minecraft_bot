@@ -54,6 +54,8 @@ function createBot() {
   bot.once('spawn', () => {
     console.log(`✅ ${config.username} spawned in the world`);
     const defaultMove = new Movements(bot);
+    defaultMove.canSwim = true;
+    defaultMove.allowSprinting = true;
     bot.pathfinder.setMovements(defaultMove);
 
     // Initialize the action executor with all modules
