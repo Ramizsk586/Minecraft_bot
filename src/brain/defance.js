@@ -56,6 +56,12 @@ async function handleIncomingAttack(bot, source, options = {}) {
   _defanceState.lastHitAt = Date.now();
   _defanceState.lastHandledAt = now;
 
+  // Signal the cortex so it doesn't start a conflicting action during combat
+  try {
+    const cortex = require('./cortex');
+    cortex.signalExternalAction('defance_combat', 75, 15000);
+  } catch {}
+
   // Auto-craft weapon if we don't have one
   try {
     const craftBrain = require('./craft');
@@ -81,6 +87,12 @@ async function handleIncomingAttack(bot, source, options = {}) {
   }
 
   await attackBrain.startAttack(bot, attacker, options);
+
+  // Release the cortex lock after combat finishes
+  try {
+    const cortex = require('./cortex');
+    cortex.releaseExternalAction('defance_combat');
+  } catch {}
 }
 
 function onHealth(bot, options = {}) {

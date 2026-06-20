@@ -61,6 +61,13 @@ function announce(bot, key, message, cooldownMs = 12000) {
   return true;
 }
 
+function acquireSurvivalControl(bot, ttlMs = 15000) {
+  const coordinator = bot.brainCoordinator;
+  const priority = bot.brainPriorities?.survive || 30;
+  if (!coordinator) return 'no-coordinator';
+  return coordinator.acquire('survive', priority, ttlMs);
+}
+
 function getBestToolInInventory(bot, type) {
   const tools = bot.inventory.items().filter(item => item.name.endsWith(`_${type}`));
   if (tools.length === 0) return null;
@@ -235,6 +242,10 @@ async function tryDeathRecovery(bot, threatReport) {
 }
 
 async function runAutonomyAction(bot, name, actionOrFn) {
+  const token = acquireSurvivalControl(bot, 20000);
+  if (!token) {
+    return;
+  }
   _surviveBusy = true;
   bot._currentTask = `autonomy:${name}`;
   console.log(`[Autonomy] Starting action: ${name}`);
@@ -249,6 +260,9 @@ async function runAutonomyAction(bot, name, actionOrFn) {
   } finally {
     if (bot._currentTask === `autonomy:${name}`) {
       bot._currentTask = null;
+    }
+    if (token !== 'no-coordinator') {
+      bot.brainCoordinator?.release('survive', token);
     }
     _surviveBusy = false;
   }
@@ -266,6 +280,8 @@ function findPlacementBlock(bot) {
  */
 async function surviveTick(bot) {
   if (_surviveBusy) return;
+  const tickToken = acquireSurvivalControl(bot, 10000);
+  if (!tickToken) return;
 
   // 1. Check if we should abort autonomy (user interaction or thinking)
   const timeSinceLastInteraction = Date.now() - bot.lastInteractionTime;
@@ -276,6 +292,9 @@ async function surviveTick(bot) {
     if (_surviveActive) {
       console.log(`[Autonomy] User activity detected. Deactivating survival mode.`);
       abort(bot);
+    }
+    if (tickToken !== 'no-coordinator') {
+      bot.brainCoordinator?.release('survive', tickToken);
     }
     return;
   }
@@ -794,42 +813,20 @@ async function surviveTick(bot) {
     }
   } catch (err) {
     console.log(`[Autonomy] Tick error: ${err.message}`);
+  } finally {
+    if (tickToken !== 'no-coordinator') {
+      bot.brainCoordinator?.release('survive', tickToken);
+    }
   }
 }
 
 function startAutonomy(bot, options = {}) {
-  stopAutonomy();
-  _surviveBot = bot;
-  _surviveOptions = options;
-  _surviveActive = false;
-  _surviveBusy = false;
-
-  // Run autonomous survive tick every 5 seconds
-  _surviveHandle = setInterval(() => {
-    surviveTick(bot).catch(err => {
-      console.log(`[Autonomy] Loop error: ${err.message}`);
-    });
-  }, 5000);
-
-  _surviveListeners = {
-    onDeath: () => recordDeathSnapshot(bot),
-  };
-  bot.on('death', _surviveListeners.onDeath);
-
-  console.log('[Autonomy] Survival system online (checks every 5s, activates on 30s idle)');
+  // Deprecated: Survive loop removed. Cortex handles all survival decisions.
+  console.log('[Autonomy] Survival loop deprecated — cortex handles survival now.');
 }
 
 function stopAutonomy() {
-  if (_surviveHandle) {
-    clearInterval(_surviveHandle);
-    _surviveHandle = null;
-  }
-  if (_surviveBot && _surviveListeners?.onDeath) {
-    _surviveBot.off('death', _surviveListeners.onDeath);
-  }
-  _surviveListeners = null;
-  _surviveActive = false;
-  _surviveBusy = false;
+  // Deprecated: No-op, cortex handles survival.
 }
 
 function abort(bot) {

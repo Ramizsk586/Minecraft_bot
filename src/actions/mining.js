@@ -94,6 +94,9 @@ async function holdDigBlock(bot, goals, block) {
     await bot.dig(freshBlock, true);
     return true;
   } catch (err) {
+    if (/goal was changed|digging aborted/i.test(err.message || '')) {
+      return false;
+    }
     console.log(`holdDigBlock failed for ${freshBlock.name}: ${err.message}`);
     return false;
   }
@@ -195,6 +198,9 @@ function register(bot, goals) {
       } else {
         console.log(`Dig error: could not break ${blockName} at ${block.position}`);
         await sleep(300);
+        if (bot._currentTask && bot._currentTask !== `autonomy:mining_${blockName}` && String(bot._currentTask).startsWith('autonomy:')) {
+          break;
+        }
         continue;
       }
 
@@ -209,6 +215,8 @@ function register(bot, goals) {
 
     if (mined > 0) {
       bot.chat(`Done! Mined ${mined} ${blockName}.`);
+    } else {
+      bot.chat(`Couldn't mine ${blockName} right now.`);
     }
   }
 

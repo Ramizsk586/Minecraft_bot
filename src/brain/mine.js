@@ -40,7 +40,14 @@ const DEFAULT_STATE = {
   busy: false,
 };
 
-let _mineHandle = null;
+// _mineHandle removed — cortex handles mining loop
+
+function canUseMineLoop(bot) {
+  const coordinator = bot.brainCoordinator;
+  const priority = bot.brainPriorities?.mine || 20;
+  if (!coordinator) return true;
+  return coordinator.canRun('mine', priority);
+}
 
 function ensureState(bot) {
   if (!bot._mineBrainState) {
@@ -248,6 +255,9 @@ async function holdDigBlock(bot, block) {
     await bot.dig(fresh, true);
     return true;
   } catch (err) {
+    if (/goal was changed|digging aborted/i.test(err.message || '')) {
+      return false;
+    }
     console.log(`Brain:Mine holdDigBlock failed: ${err.message}`);
     return false;
   }
@@ -513,9 +523,14 @@ function mineReport(bot, options = {}) {
 async function autonomousMineTick(bot, options = {}) {
   const state = ensureState(bot);
   if (!state.active || state.busy) return;
-  if (bot._currentTask && !String(bot._currentTask).startsWith('autonomy:')) return;
+  if (bot._currentTask && !String(bot._currentTask).startsWith('autonomy:mine:')) return;
   if (bot._combatState?.target) return;
   if (bot.isThinking) return;
+  if (bot.targetDigBlock) return;
+  if (!canUseMineLoop(bot)) return;
+
+  const token = bot.brainCoordinator?.acquire('mine', bot.brainPriorities?.mine || 20, 12000);
+  if (bot.brainCoordinator && !token) return;
 
   state.busy = true;
   bot._currentTask = `autonomy:mine:${state.mode}`;
@@ -533,6 +548,9 @@ async function autonomousMineTick(bot, options = {}) {
     if (String(bot._currentTask).startsWith('autonomy:mine:')) {
       bot._currentTask = null;
     }
+    if (token) {
+      bot.brainCoordinator?.release('mine', token);
+    }
     state.busy = false;
   }
 }
@@ -545,21 +563,12 @@ function setMiningMode(bot, mode = 'mixed') {
 }
 
 function startAutoMine(bot, options = {}) {
-  stopAutoMine();
-  ensureState(bot);
-  _mineHandle = setInterval(() => {
-    autonomousMineTick(bot, options).catch(err => {
-      console.log(`Brain:Mine loop error: ${err.message}`);
-    });
-  }, 4000);
-  console.log('Brain:Mine monitor started');
+  // Deprecated: Auto-mine loop removed. Cortex handles mining decisions.
+  console.log('Brain:Mine auto-mine loop deprecated — cortex handles mining now.');
 }
 
 function stopAutoMine() {
-  if (_mineHandle) {
-    clearInterval(_mineHandle);
-    _mineHandle = null;
-  }
+  // Deprecated: No-op, cortex handles mining.
 }
 
 module.exports = {

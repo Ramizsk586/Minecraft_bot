@@ -723,6 +723,10 @@ async function watchdogTick() {
   }
 
   log(`Condition detected: [${triggered.name}] (attempt ${_retryCount + 1}/${MAX_RECOVERY_RETRIES})`);
+  const stuckToken = _bot.brainCoordinator?.acquire('stuck', _bot.brainPriorities?.stuck || 100, RECOVERY_TIMEOUT_MS + 3000);
+  if (_bot.brainCoordinator && !stuckToken) {
+    return;
+  }
   _isRecovering = true;
   _bot.isStuckRecovering = true;
   _retryCount++;
@@ -750,6 +754,9 @@ async function watchdogTick() {
     if (triggered.name !== 'pathfinder_loop') resumePathfinder(_bot);
     _isRecovering = false;
     if (_bot) _bot.isStuckRecovering = false;
+    if (stuckToken) {
+      _bot.brainCoordinator?.release('stuck', stuckToken);
+    }
 
     // Emit event so other modules can react
     _bot.emit('stuckRecovered', triggered.name);

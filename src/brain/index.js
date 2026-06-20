@@ -1,5 +1,6 @@
 // Brain Controller
 // Handles fast local behaviors before falling back to the LLM.
+// Uses the unified Cortex loop for all autonomous decisions.
 
 const eatBrain = require('./eat');
 const attackBrain = require('./attack');
@@ -10,11 +11,77 @@ const surviveBrain = require('./survive');
 const chatBrain = require('./chat');
 const stuckBrain = require('./stuck');
 const swimBrain = require('./swim');
+const cortex = require('./cortex');
 
 let _brainBot = null;
 let _brainOptions = {};
-let _autonomyHandle = null;
-let _autonomyBusy = false;
+
+const BRAIN_PRIORITIES = {
+  idle: 0,
+  mine: 20,
+  survive: 30,
+  eat: 40,
+  combat: 80,
+  stuck: 100,
+};
+
+function createBrainCoordinator(bot) {
+  const state = {
+    owner: null,
+    token: null,
+    priority: 0,
+    expiresAt: 0,
+  };
+
+  function clearIfExpired() {
+    if (state.owner && state.expiresAt > 0 && Date.now() > state.expiresAt) {
+      state.owner = null;
+      state.token = null;
+      state.priority = 0;
+      state.expiresAt = 0;
+    }
+  }
+
+  return {
+    canRun(owner, priority = 0) {
+      clearIfExpired();
+      return !state.owner || state.owner === owner || state.priority <= priority;
+    },
+    acquire(owner, priority = 0, ttlMs = 15000) {
+      clearIfExpired();
+      if (state.owner && state.owner !== owner && state.priority > priority) {
+        return null;
+      }
+
+      const token = `${owner}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+      state.owner = owner;
+      state.token = token;
+      state.priority = priority;
+      state.expiresAt = ttlMs > 0 ? Date.now() + ttlMs : 0;
+      return token;
+    },
+    renew(owner, token, ttlMs = 15000) {
+      clearIfExpired();
+      if (state.owner !== owner || state.token !== token) return false;
+      state.expiresAt = ttlMs > 0 ? Date.now() + ttlMs : 0;
+      return true;
+    },
+    release(owner, token) {
+      clearIfExpired();
+      if (state.owner !== owner) return false;
+      if (token && state.token !== token) return false;
+      state.owner = null;
+      state.token = null;
+      state.priority = 0;
+      state.expiresAt = 0;
+      return true;
+    },
+    snapshot() {
+      clearIfExpired();
+      return { ...state };
+    },
+  };
+}
 
 const EAT_PATTERNS = [
   /^eat$/i,
@@ -357,87 +424,16 @@ async function handleMineCommand(bot, rawCommand, capturedTarget) {
   return true;
 }
 
-async function autonomyTick(bot) {
-  if (_autonomyBusy) return;
-  _autonomyBusy = true;
-
-  try {
-    const armorSlots = [5, 6, 7, 8];
-    const armorTypes = ['helmet', 'chestplate', 'leggings', 'boots'];
-    const armorDests = ['head', 'torso', 'legs', 'feet'];
-
-    for (let i = 0; i < armorSlots.length; i++) {
-      const equipped = bot.inventory.slots[armorSlots[i]];
-      if (equipped) continue;
-
-      const tiers = ['netherite', 'diamond', 'iron', 'golden', 'chainmail', 'leather'];
-      for (const tier of tiers) {
-        const name = `${tier}_${armorTypes[i]}`;
-        const item = bot.inventory.items().find(it => it.name === name);
-        if (!item) continue;
-        try {
-          await bot.equip(item, armorDests[i]);
-          console.log(`Brain:Autonomy equipped ${name}`);
-        } catch {}
-        break;
-      }
-    }
-
-    const wheatCount = craftBrain.countItem(bot, 'wheat');
-    const breadCount = craftBrain.countItem(bot, 'bread');
-    if (wheatCount >= 9 && breadCount < 3) {
-      const batches = Math.floor(wheatCount / 3);
-      try {
-        await craftBrain.craft(bot, 'bread', Math.min(batches, 5), { silent: true });
-      } catch {}
-    }
-
-    const logCount = craftBrain.countAnyOf(bot, craftBrain.LOG_TYPES);
-    const plankCount = craftBrain.countAnyOf(bot, craftBrain.PLANK_TYPES);
-    const tableCount = craftBrain.countItem(bot, 'crafting_table');
-    if (logCount >= 4 && plankCount === 0 && tableCount === 0) {
-      try {
-        await craftBrain.craft(bot, 'planks', 1, { silent: true });
-      } catch {}
-    }
-
-    const bestWeapon = attackBrain.pickBestWeapon(bot);
-    if (!bestWeapon && (logCount >= 2 || plankCount >= 2 || craftBrain.hasItem(bot, 'cobblestone', 2))) {
-      try {
-        await craftBrain.craftBestTiered(bot, 'sword', 1, { silent: true });
-      } catch {}
-    }
-  } catch (err) {
-    console.log(`Brain:Autonomy tick error: ${err.message}`);
-  } finally {
-    _autonomyBusy = false;
-  }
-}
-
-function startAutonomy(bot) {
-  stopAutonomy();
-  _autonomyHandle = setInterval(() => {
-    autonomyTick(bot).catch(err => {
-      console.log(`Brain:Autonomy error: ${err.message}`);
-    });
-  }, 45000);
-  setTimeout(() => autonomyTick(bot).catch(() => {}), 15000);
-  console.log('Brain:Autonomy loop started (45s interval)');
-}
-
-function stopAutonomy() {
-  if (_autonomyHandle) {
-    clearInterval(_autonomyHandle);
-    _autonomyHandle = null;
-  }
-  _autonomyBusy = false;
-}
+// Old autonomyTick, startAutonomy, stopAutonomy removed.
+// All autonomous behavior is now handled by the Cortex unified loop.
 
 function init(bot, options = {}) {
   _brainBot = bot;
   _brainOptions = options;
-  console.log('Brain initializing...');
+  console.log('Brain initializing with Cortex unified loop...');
 
+  bot.brainCoordinator = createBrainCoordinator(bot);
+  bot.brainPriorities = BRAIN_PRIORITIES;
   bot.isStuckRecovering = false;
   bot._swimState = {
     active: false,
@@ -454,34 +450,31 @@ function init(bot, options = {}) {
     console.log(`Brain:Stuck gave up on ${reason}`);
   });
 
-  eatBrain.startAutoEat(bot);
+  // Event-driven defense (reacts to damage instantly — not a loop)
   defanceBrain.startAutoDefance(bot, options);
-  startAutonomy(bot);
-  mineBrain.startAutoMine(bot, options);
-  surviveBrain.startAutonomy(bot, options);
+
+  // Stuck detection safety net (2s watchdog — independent for safety)
   stuckBrain.startMonitoring(bot, options.stuck || {});
 
-  console.log('Brain online - handling: eat, craft, combat, defance, mining, gear up, autonomous survival, stuck recovery');
-  console.log('Auto-eat monitor active');
-  console.log('Auto-defance monitor active');
-  console.log('Auto-mine monitor active');
-  console.log('Autonomy loop active');
-  console.log('Autonomous survival system active');
-  console.log('Stuck recovery monitor active');
+  // ★ Cortex: the ONE unified brain loop that handles everything
+  cortex.start(bot, options);
+
+  console.log('Brain online — Cortex unified loop active');
+  console.log('Subsystems: cortex (unified), defance (event-driven), stuck (safety-net)');
 }
 
 function shutdown() {
-  eatBrain.stopAutoEat();
-  stopAutonomy();
-  mineBrain.stopAutoMine();
-  surviveBrain.stopAutonomy();
+  // Stop cortex first
+  cortex.stop();
+
+  // Stop safety-net subsystems
   stuckBrain.stopMonitoring();
   if (_brainBot) {
     swimBrain.clearSwimState(_brainBot);
-  }
-  if (_brainBot) {
     defanceBrain.stopAutoDefance(_brainBot);
     _brainBot.isStuckRecovering = false;
+    _brainBot.brainCoordinator?.release('stuck');
+    _brainBot.brainCoordinator?.release('combat');
   }
   _brainBot = null;
   _brainOptions = {};
@@ -501,4 +494,5 @@ module.exports = {
   chat: chatBrain,
   stuck: stuckBrain,
   swim: swimBrain,
+  cortex,
 };

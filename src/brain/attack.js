@@ -276,8 +276,16 @@ async function startAttack(bot, target, options = {}) {
     return { started: false, reason: 'invalid target' };
   }
 
+  const combatToken = bot.brainCoordinator?.acquire('combat', bot.brainPriorities?.combat || 80, COMBAT_TIMEOUT_MS + 5000);
+  if (bot.brainCoordinator && !combatToken) {
+    return { started: false, reason: 'brain busy with higher priority task' };
+  }
+
   if (bot._combatState?.target?.id === target.id) {
     bot._combatState.lastSeenAt = Date.now();
+    if (combatToken) {
+      bot.brainCoordinator?.release('combat', combatToken);
+    }
     return { started: true, reason: 'already attacking' };
   }
 
@@ -305,6 +313,7 @@ async function startAttack(bot, target, options = {}) {
     timeoutTimer: null,
     strafeDir: 'left',
     lastStrafeSwitch: 0,
+    coordinatorToken: combatToken || null,
   };
 
   bot._combatState = combatState;
@@ -424,7 +433,11 @@ function stopAttack(bot, options = {}) {
   if (!state) return false;
 
   const enemyName = state.enemyName;
+  const token = state.coordinatorToken || null;
   clearCombatState(bot);
+  if (token) {
+    bot.brainCoordinator?.release('combat', token);
+  }
 
   if (!options.silent) {
     const bucket = options.reason === 'finish' ? 'finish' : options.reason === 'retreat' ? 'retreat' : null;

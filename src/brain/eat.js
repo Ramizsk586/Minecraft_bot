@@ -367,101 +367,17 @@ function foodReport(bot) {
   return lines;
 }
 
-// ─── Background Auto-Eat Monitor ──────────────────────────────────────────────
+// ─── Auto-Eat Stubs (loop removed — cortex handles eating) ─────────────────
 
-let _autoEatHandle = null;
-let _isEating = false;
+// _autoEatHandle and _isEating removed — no longer needed.
 
-/**
- * Start the background auto-eat loop. Checks hunger every few seconds and
- * eats automatically when needed — completely LLM-free.
- *
- * Thresholds:
- *   food <= 6  → CRITICAL: eat immediately, check every 3s
- *   food <= 14 → LOW: eat soon, check every 10s
- *   food <= 17 → FINE: eat if convenient, check every 20s
- *   food > 17  → FULL: do nothing, check every 30s
- *
- * @param {import('mineflayer').Bot} bot
- */
 function startAutoEat(bot) {
-  stopAutoEat();
-
-  async function tick() {
-    if (_isEating) return;
-
-    try {
-      const food = bot.food;
-      let threatLevel = 'none';
-      try {
-        threatLevel = require('./mine').scanThreatLevel(bot).level;
-      } catch {}
-
-      if (food <= 6) {
-        // CRITICAL — eat immediately, even raw if needed
-        _isEating = true;
-        console.log(`🧠 Brain:Eat [CRITICAL] food=${food}/20 — eating NOW`);
-        const result = await eat(bot, { silent: false, force: true, threatLevel, preferCooking: false });
-        if (!result.ate) {
-          // Desperate: try crafting food
-          try {
-            const craftBrain = require('./craft');
-            await craftBrain.craftFoodIfPossible(bot, { silent: false });
-            await eat(bot, { silent: false, force: true, threatLevel, preferCooking: false });
-          } catch {}
-        }
-        _isEating = false;
-        // Check again quickly in case we're still low
-        _autoEatHandle = setTimeout(tick, 3000);
-      } else if (food <= 14) {
-        // LOW — eat soon
-        _isEating = true;
-        console.log(`🧠 Brain:Eat [LOW] food=${food}/20 — eating`);
-        await eat(bot, {
-          silent: true,
-          threatLevel,
-          preferCooking: threatLevel === 'none' && food >= 9,
-        });
-        _isEating = false;
-        _autoEatHandle = setTimeout(tick, 10000);
-      } else if (food <= 17) {
-        // FINE — eat if we have good food available, otherwise cook in calm situations
-        const best = pickBestFood(bot);
-        if (best && best.score >= 1.5) {
-          _isEating = true;
-          await eat(bot, { silent: true, threatLevel, preferCooking: false });
-          _isEating = false;
-        } else if (threatLevel === 'none') {
-          try {
-            await require('../cook').cookBestFood(bot);
-          } catch {}
-        }
-        _autoEatHandle = setTimeout(tick, 20000);
-      } else {
-        // FULL — just check later
-        _autoEatHandle = setTimeout(tick, 30000);
-      }
-    } catch (err) {
-      console.log(`🧠 Brain:Eat tick error: ${err.message}`);
-      _isEating = false;
-      _autoEatHandle = setTimeout(tick, 15000);
-    }
-  }
-
-  // Start the first tick after 5s (let bot settle after spawn)
-  _autoEatHandle = setTimeout(tick, 5000);
-  console.log('🧠 Brain:Eat auto-eat monitor started');
+  // Deprecated: Auto-eat loop removed. Cortex handles eating.
+  console.log('Brain:Eat auto-eat loop deprecated — cortex handles eating now.');
 }
 
-/**
- * Stop the background auto-eat loop.
- */
 function stopAutoEat() {
-  if (_autoEatHandle) {
-    clearTimeout(_autoEatHandle);
-    _autoEatHandle = null;
-  }
-  _isEating = false;
+  // Deprecated: No-op, cortex handles eating.
 }
 
 /**
