@@ -21,6 +21,7 @@ const craftBrain     = require('./craft');
 const mineBrain      = require('./mine');
 const swimBrain      = require('./swim');
 const cookController = require('../cook');
+const biom           = require('../biom/index');  // biome-specific survival plans
 
 const world  = require('../library/world');
 const skills = require('../library/skills');
@@ -46,11 +47,11 @@ const PRIORITIES = {
 
 // Dynamic tick intervals based on survival score
 const TICK_SPEEDS = [
-  { maxScore: 20,  intervalMs: 1500  },  // CRITICAL — tick every 1.5s
-  { maxScore: 40,  intervalMs: 3000  },  // DANGER
-  { maxScore: 60,  intervalMs: 5000  },  // ALERT
-  { maxScore: 80,  intervalMs: 8000  },  // NORMAL
-  { maxScore: 101, intervalMs: 12000 },  // SAFE
+  { maxScore: 20,  intervalMs: 1000 },
+  { maxScore: 40,  intervalMs: 1500 },
+  { maxScore: 60,  intervalMs: 2000 },
+  { maxScore: 80,  intervalMs: 2500 },
+  { maxScore: 101, intervalMs: 3000 },
 ];
 
 // Scoring weights for survival probability
@@ -91,6 +92,8 @@ const _state = {
   lastAction:       null,
   lastActionAt:     0,
   tickCount:        0,
+  persistentGoal:   null,
+  persistentSince:  0,
   announcements:    {},     // cooldown map for chat messages
   shelterPos:       null,
   furnacePos:       null,
@@ -156,6 +159,47 @@ function releaseLock(actionName) {
 function currentLock() {
   if (isLocked()) return { owner: _lock.owner, priority: _lock.priority };
   return null;
+}
+
+function shouldTreatAsExternalActiveTask(taskName) {
+  if (!taskName) return false;
+  const task = String(taskName);
+  if (task.startsWith('cortex:')) return false;
+  if (task.startsWith('autonomy:')) return false;
+  if (task.startsWith('resume:')) return true;
+  if (task.includes('mine') || task.includes('gather') || task.includes('build') || task.includes('follow') || task.includes('farm') || task.includes('strip')) {
+    return true;
+  }
+  return false;
+}
+
+function isMaintenanceAction(actionName) {
+  return [
+    'equip_torch_night',
+    'equip_armor',
+    'cook_food',
+    'craft_bread',
+    'idle',
+  ].includes(actionName);
+}
+
+function rememberPersistentGoal(action) {
+  if (!action || isMaintenanceAction(action.name)) return;
+  _state.persistentGoal = action.name;
+  _state.persistentSince = Date.now();
+}
+
+function clearPersistentGoal(actionName = null) {
+  if (!actionName || _state.persistentGoal === actionName) {
+    _state.persistentGoal = null;
+    _state.persistentSince = 0;
+  }
+}
+
+function shouldKeepPersistentGoal() {
+  if (!_state.persistentGoal) return false;
+  if (!shouldTreatAsExternalActiveTask(_bot?._currentTask)) return false;
+  return Date.now() - (_state.persistentSince || 0) < 90000;
 }
 
 // ─── Situation Assessor ──────────────────────────────────────────────────────
@@ -231,6 +275,12 @@ function assessSituation() {
     environmentFactor * WEIGHTS.environment
   );
 
+  // Biome detection — use the new biom/ plan system
+  const biomePlan     = biom.getCurrentBiomePlan(_bot);
+  const biomeName     = biom.getBiomeName(_bot);
+  const biomeCategory = biomePlan.category;
+  const biomeRisk     = biom.getRiskFlags(_bot);
+
   return {
     survivalScore: Math.max(0, Math.min(100, survivalScore)),
     health, food,
@@ -246,6 +296,9 @@ function assessSituation() {
     hasFood: !!eatBrain.pickBestFood(_bot),
     inCombat: !!_bot._combatState?.target?.isValid,
     isNight: (_bot.time?.timeOfDay || 0) >= 13000 && (_bot.time?.timeOfDay || 0) < 23000,
+    biomeName,
+    biomeCategory,
+    biomeRisk,
   };
 }
 
@@ -259,6 +312,7 @@ function selectAction(situation) {
     survivalScore, health, food,
     threatReport, isDaytime, isUnderwater, isDrowning, isNight,
     hasPickaxe, hasAxe, hasSword, hasWeapon, hasFood, inCombat,
+    biomeCategory, biomeRisk,
   } = situation;
 
   // ── 1. Drowning / Swimming emergency ──
@@ -274,8 +328,20 @@ function selectAction(situation) {
     });
   }
 
+  if (biomeRisk.needsShoreFirst && threatReport.level !== 'high') {
+    actions.push({
+      name: 'reach_shore',
+      priority: PRIORITIES.swim - 2,
+      maxDuration: 12000,
+      execute: async () => {
+        const result = await swimBrain.swimToSafety(_bot, { radius: 24 });
+        log(`Shore-seeking: ${result.reason}`);
+      },
+    });
+  }
+
   // ── 2. Flee — health critical AND hostile mob close ──
-  if (health <= 4 && threatReport.closeThreats > 0) {
+  if (health <= 6 && threatReport.closeThreats > 0) {
     actions.push({
       name: 'flee_and_eat',
       priority: PRIORITIES.flee,
@@ -293,7 +359,7 @@ function selectAction(situation) {
   // ── 3. Counter-attack — hostile mob is attacking us ──
   if (threatReport.level !== 'none' && threatReport.primaryThreat && health > 4) {
     const combatPriority = threatReport.level === 'high'
-      ? PRIORITIES.combat + 10
+      ? PRIORITIES.flee - 1
       : PRIORITIES.combat;
 
     actions.push({
@@ -303,8 +369,10 @@ function selectAction(situation) {
       execute: async () => {
         try { await craftBrain.ensureWeapon(_bot); } catch {}
         if (threatReport.level === 'high' && health <= 8) {
-          // High threat + low health: fight-or-flight
-          await mineBrain.runMineDecision(_bot, _options);
+          await mineBrain.retreatFromThreats(_bot, threatReport);
+          if (_bot.food <= 18) {
+            await eatBrain.eat(_bot, { silent: true, force: true, threatLevel: threatReport.level });
+          }
         } else {
           await attackBrain.startAttack(_bot, threatReport.primaryThreat, _options);
         }
@@ -348,7 +416,7 @@ function selectAction(situation) {
   // ── 5a. Night Off-Hand Torch ──
   const offHandItem = _bot.inventory.slots[45];
   const holdingTorch = offHandItem && offHandItem.name === 'torch';
-  if (isNight && !holdingTorch && !inCombat) {
+  if (isNight && !holdingTorch && !inCombat && threatReport.level === 'none' && health >= 12) {
     actions.push({
       name: 'equip_torch_night',
       priority: PRIORITIES.night_safety + 5,
@@ -379,7 +447,7 @@ function selectAction(situation) {
   }
 
   // ── 6. Night safety ──
-  if (isNight && !inCombat) {
+  if (isNight && !inCombat && threatReport.level !== 'high') {
     actions.push({
       name: 'night_safety',
       priority: PRIORITIES.night_safety,
@@ -407,7 +475,7 @@ function selectAction(situation) {
     actions.push({
       name: 'craft_tools',
       priority: PRIORITIES.craft_tools,
-      maxDuration: 20000,
+      maxDuration: 120000, // needs time to wander + chop a tree
       execute: async () => {
         await handleToolProgression();
       },
@@ -429,18 +497,33 @@ function selectAction(situation) {
     }
   }
 
-  // ── 10. Low resources ──
-  const logCount = craftBrain.countAnyOf(_bot, mineBrain.LOG_TYPES);
+  // ── 10. Low resources (biome-aware) ──
+  const biomeLogTypes = biom.getLogTypes(_bot);
+  const logCount = craftBrain.countAnyOf(_bot, biomeLogTypes);
   if (logCount < 10 && isDaytime && threatReport.level === 'none' && !isNight) {
     actions.push({
       name: 'gather_resources',
       priority: PRIORITIES.gather,
-      maxDuration: 20000,
+      maxDuration: 60000,
       execute: async () => {
-        announce('gather', 'Gathering some more wood...', 20000);
-        const result = await mineBrain.cutTreeSafely(_bot, _options);
+        const plan = biom.getCurrentBiomePlan(_bot);
+        announce('gather', `🪵 Gathering ${plan.logTypes[0] || 'wood'} for this biome...`, 20000);
+        const result = await mineBrain.cutTreeSafely(_bot, _options, plan.logTypes);
         if (result.success) {
           await mineBrain.ensureProgression(_bot);
+        } else if (result.reason === 'no tree found') {
+          announce('gather_wander', `🌲 No ${plan.logTypes[0] || 'wood'} nearby — searching...`, 20000);
+          const wander = await mineBrain.wanderToTree(_bot, _options, plan.logTypes);
+          if (wander.success) {
+            await mineBrain.cutTreeSafely(_bot, _options, plan.logTypes);
+          } else if (biom.needsSurfaceWood(_bot)) {
+            const fallbackLogs = biom.getFallbackLogTypes(_bot);
+            announce('gather_surface_fallback', `🌲 No native wood here — falling back to surface logs.`, 25000);
+            const retry = await mineBrain.wanderToTree(_bot, _options, fallbackLogs);
+            if (retry.success) {
+              await mineBrain.cutTreeSafely(_bot, _options, fallbackLogs);
+            }
+          }
         }
       },
     });
@@ -553,6 +636,20 @@ function selectAction(situation) {
   }
 
   // Sort by priority descending and pick the highest
+  if (actions.length === 0 && threatReport.level === 'high') {
+    actions.push({
+      name: 'survive_high_threat',
+      priority: PRIORITIES.flee,
+      maxDuration: 10000,
+      execute: async () => {
+        await mineBrain.retreatFromThreats(_bot, threatReport);
+        if (_bot.food <= 16 || _bot.health <= 10) {
+          await eatBrain.eat(_bot, { silent: true, force: _bot.health <= 8, threatLevel: threatReport.level });
+        }
+      },
+    });
+  }
+
   actions.sort((a, b) => b.priority - a.priority);
   return actions[0];
 }
@@ -566,39 +663,51 @@ async function handleNightSafety() {
 
   if (_bot.isSleeping) return;
 
-  // A. Try to find a nearby bed block to sleep
-  const bedBlock = world.getNearestBlock(_bot, block => block.name.endsWith('_bed'), 24);
-  if (bedBlock) {
-    const dist = _bot.entity.position.distanceTo(bedBlock.position);
-    if (dist > 3) {
-      try {
-        await _bot.pathfinder.goto(new goals.GoalNear(bedBlock.position.x, bedBlock.position.y, bedBlock.position.z, 2.5));
-      } catch {}
-    } else {
-      try {
-        _bot.chat("🛌 Going to sleep...");
-        await _bot.sleep(bedBlock);
-      } catch (err) {
-        log(`Sleep failed: ${err.message}`);
-      }
-    }
-    return;
-  }
+  // Detect biome — this drives all decisions below
+  const biomePlan = biom.getCurrentBiomePlan(_bot);
+  const bedSafe   = biom.canSleepInBed(_bot);
 
-  // B. Place a bed if we have one
-  const bedItem = _bot.inventory.items().find(i => i.name.endsWith('_bed'));
-  if (bedItem) {
-    const ref = world.getNearestBlock(_bot, block =>
-      ['grass_block', 'dirt', 'stone', 'cobblestone', 'oak_planks', 'spruce_planks', 'birch_planks'].includes(block.name), 4);
-    if (ref) {
-      _bot.chat("🛌 Placing bed to sleep...");
-      try {
-        await _bot.equip(bedItem, 'hand');
-        await _bot.placeBlock(ref, new Vec3(0, 1, 0));
-      } catch (err) {
-        log(`Placing bed failed: ${err.message}`);
+  // A. Try to find a nearby bed block to sleep (only if safe in this biome)
+  if (bedSafe) {
+    const bedBlock = world.getNearestBlock(_bot, block => block.name.endsWith('_bed'), 24);
+    if (bedBlock) {
+      const dist = _bot.entity.position.distanceTo(bedBlock.position);
+      if (dist > 3) {
+        try {
+          await _bot.pathfinder.goto(new goals.GoalNear(bedBlock.position.x, bedBlock.position.y, bedBlock.position.z, 2.5));
+        } catch {}
+      } else {
+        try {
+          _bot.chat("🛏️ Going to sleep...");
+          await _bot.sleep(bedBlock);
+        } catch (err) {
+          log(`Sleep failed: ${err.message}`);
+        }
       }
       return;
+    }
+
+    // B. Place a bed if we have one (only safe in overworld)
+    const bedItem = _bot.inventory.items().find(i => i.name.endsWith('_bed'));
+    if (bedItem) {
+      const ref = world.getNearestBlock(_bot, block =>
+        ['grass_block', 'dirt', 'stone', 'cobblestone', 'oak_planks', 'spruce_planks', 'birch_planks'].includes(block.name), 4);
+      if (ref) {
+        _bot.chat("🛏️ Placing bed to sleep...");
+        try {
+          await _bot.equip(bedItem, 'hand');
+          await _bot.placeBlock(ref, new Vec3(0, 1, 0));
+        } catch (err) {
+          log(`Placing bed failed: ${err.message}`);
+        }
+        return;
+      }
+    }
+  } else {
+    // Nether / End — warn if someone has a bed (it will explode!)
+    const bedItem = _bot.inventory.items().find(i => i.name.endsWith('_bed'));
+    if (bedItem) {
+      announce('nether_bed_warn', `💥 NOT sleeping in ${biomePlan.name} — beds EXPLODE here! Building shelter instead.`, 60000);
     }
   }
 
@@ -618,21 +727,11 @@ async function handleNightSafety() {
     return;
   }
 
-  // D. Build emergency shelter
-  const cobble = craftBrain.countItem(_bot, 'cobblestone');
-  const dirt   = craftBrain.countItem(_bot, 'dirt');
-  const stone  = craftBrain.countItem(_bot, 'stone');
-  const planks = craftBrain.countAnyOf(_bot, craftBrain.PLANK_TYPES);
-  const total  = cobble + dirt + stone + planks;
-
-  if (total >= 15) {
-    let blockToUse = 'dirt';
-    if (cobble >= 15) blockToUse = 'cobblestone';
-    else if (stone >= 15) blockToUse = 'stone';
-    else if (planks >= 15) blockToUse = craftBrain.PLANK_TYPES.find(p => craftBrain.countItem(_bot, p) >= 15) || 'oak_planks';
-
+  // D. Build emergency shelter using biome-appropriate block
+  const blockToUse = biom.getShelterBlock(_bot);
+  if (blockToUse) {
     const pos = _bot.entity.position.floored();
-    _bot.chat(`🛡️ Building emergency shelter using ${blockToUse}...`);
+    _bot.chat(`🛡️ Building ${biomePlan.name} shelter using ${blockToUse}...`);
 
     const x = pos.x, y = pos.y, z = pos.z;
     const wallCoords = [
@@ -657,25 +756,51 @@ async function handleNightSafety() {
     return;
   }
 
-  // E. Mine dirt for shelter
-  if (dirt < 15) {
-    _bot.chat("Mining some dirt for night shelter...");
-    await skills.mineBlock(_bot, 'dirt', 15);
+  // E. Fallback: mine the biome's common block for shelter material
+  const fallbackBlock = biomePlan.stoneEquivalents?.[0]
+    || biomePlan.commonBlocks?.[0]
+    || (biomePlan.category === 'nether' ? 'netherrack' : 'dirt');
+  const fallbackCount = craftBrain.countItem(_bot, fallbackBlock);
+  if (fallbackCount < 15) {
+    _bot.chat(`Mining some ${fallbackBlock} for emergency shelter...`);
+    await skills.mineBlock(_bot, fallbackBlock, 15);
   }
 }
 
 async function handleToolProgression() {
-  const logCount  = craftBrain.countAnyOf(_bot, mineBrain.LOG_TYPES);
-  const planks    = craftBrain.countAnyOf(_bot, craftBrain.PLANK_TYPES);
-  const sticks    = craftBrain.countItem(_bot, 'stick');
-  const table     = craftBrain.countItem(_bot, 'crafting_table');
-  const cobble    = craftBrain.countItem(_bot, 'cobblestone');
+  // Get the current biome plan to know which logs to search for
+  const biomePlan     = biom.getCurrentBiomePlan(_bot);
+  const biomeLogTypes = biom.getLogTypes(_bot);
+  const fallbackLogs  = biom.getFallbackLogTypes(_bot);
+
+  const logCount   = craftBrain.countAnyOf(_bot, biomeLogTypes);
+  const planks     = craftBrain.countAnyOf(_bot, craftBrain.PLANK_TYPES);
+  const sticks     = craftBrain.countItem(_bot, 'stick');
+  const table      = craftBrain.countItem(_bot, 'crafting_table');
+  const progressionBlocks = biom.getProgressionBlocks(_bot);
+  const coreBlock = biomePlan.stoneEquivalents?.[0] || progressionBlocks[0] || 'cobblestone';
+  const cobble     = craftBrain.countAnyOf(_bot, progressionBlocks);
   const hasPickaxe = _bot.inventory.items().some(i => i.name.endsWith('_pickaxe'));
 
-  // Step 1: Gather wood if needed
+  // Step 1: Gather the biome-correct wood/stems if needed
   if (!hasPickaxe && logCount < 4 && planks < 4) {
-    announce('tools', 'No pickaxe, gathering logs first.', 20000);
-    const result = await mineBrain.cutTreeSafely(_bot, _options);
+    const primaryLog = biomeLogTypes[0] || 'logs';
+    announce('tools', `No pickaxe — going to chop ${primaryLog}.`, 20000);
+    let result = await mineBrain.cutTreeSafely(_bot, _options, biomeLogTypes);
+
+    // If no tree/stem found nearby, actively explore to find one
+    if (!result.success && result.reason === 'no tree found') {
+      announce('tools_wander', `🌲 No ${primaryLog} nearby — exploring to find some...`, 20000);
+      const wander = await mineBrain.wanderToTree(_bot, _options, biomeLogTypes);
+      if (wander.success) {
+        result = await mineBrain.cutTreeSafely(_bot, _options, biomeLogTypes);
+      } else {
+        announce('tools_wander_fail', `🌲 Could not find ${primaryLog} — trying secondary log types...`, 30000);
+        const wander2 = await mineBrain.wanderToTree(_bot, _options, fallbackLogs);
+        if (wander2.success) result = await mineBrain.cutTreeSafely(_bot, _options, fallbackLogs);
+      }
+    }
+
     if (result.success) await mineBrain.ensureProgression(_bot);
     return;
   }
@@ -706,17 +831,24 @@ async function handleToolProgression() {
   // Step 5: Mine cobblestone
   const pickaxe = _bot.inventory.items().find(i => i.name === 'wooden_pickaxe');
   if (pickaxe && cobble < 12) {
-    announce('tools', 'Mining cobblestone to upgrade tools...', 20000);
-    await skills.mineBlock(_bot, 'stone', 8);
+    announce('tools', `Mining ${coreBlock} to upgrade tools...`, 20000);
+    await skills.mineBlock(_bot, coreBlock, 8);
     return;
   }
 
   // Step 6: Craft stone tools
   if (pickaxe && cobble >= 11) {
-    announce('tools', 'Upgrading to stone gear!', 15000);
-    await skills.craftItem(_bot, 'stone_pickaxe', 1);
-    await skills.craftItem(_bot, 'stone_sword', 1);
-    await skills.craftItem(_bot, 'stone_axe', 1);
+    if (biomePlan.category === 'nether') {
+      announce('tools', 'Upgrading to blackstone gear!', 15000);
+      await skills.craftItem(_bot, 'stone_pickaxe', 1);
+      await skills.craftItem(_bot, 'stone_sword', 1);
+      await skills.craftItem(_bot, 'stone_axe', 1);
+    } else {
+      announce('tools', 'Upgrading to stone gear!', 15000);
+      await skills.craftItem(_bot, 'stone_pickaxe', 1);
+      await skills.craftItem(_bot, 'stone_sword', 1);
+      await skills.craftItem(_bot, 'stone_axe', 1);
+    }
     await skills.craftItem(_bot, 'furnace', 1);
   }
 }
@@ -912,14 +1044,13 @@ async function cortexTick() {
 
   // Skip if user is actively interacting or LLM is thinking
   const timeSinceInteraction = Date.now() - (_bot.lastInteractionTime || 0);
-  const isPlayerBusy = _bot._currentTask && !_bot._currentTask.startsWith('cortex:');
+  const isPlayerBusy = shouldTreatAsExternalActiveTask(_bot._currentTask);
   const isThinking = _bot.isThinking;
 
-  if (timeSinceInteraction < 30000 || isPlayerBusy || isThinking) {
+  if (timeSinceInteraction < 1000 || isPlayerBusy || isThinking) {
     if (_state.surviveActive) {
       log('User activity detected. Deactivating autonomous mode.');
       _state.surviveActive = false;
-      _bot.pathfinder?.setGoal(null);
       _bot.setControlState('jump', false);
       _bot.setControlState('sneak', false);
       _bot.setControlState('sprint', false);
@@ -931,8 +1062,10 @@ async function cortexTick() {
   // Activate autonomous mode if not already
   if (!_state.surviveActive) {
     _state.surviveActive = true;
+    const biomePlan = biom.getCurrentBiomePlan(_bot);
     _bot.chat("💤 Player is idle. Cortex engaging autonomous survival mode...");
-    log('Autonomous mode activated.');
+    _bot.chat(biomePlan.survivalTip);
+    log(`Autonomous mode activated. Biome: ${biomePlan.name}`);
   }
 
   // If lock is held by a running action, skip this tick
@@ -951,8 +1084,13 @@ async function cortexTick() {
     _state.lastSurvivalScore = situation.survivalScore;
 
     // 2. Select the best action
-    const action = selectAction(situation);
+    let action = selectAction(situation);
     if (!action) return;
+
+    if (shouldKeepPersistentGoal() && action.name !== _state.persistentGoal && isMaintenanceAction(action.name)) {
+      log(`Keeping persistent goal: ${_state.persistentGoal} (skip maintenance ${action.name})`);
+      return;
+    }
 
     // 3. Log decision
     const scoreLabel = situation.survivalScore < 20 ? 'CRITICAL'
@@ -972,6 +1110,7 @@ async function cortexTick() {
 
     _state.lastAction = action.name;
     _state.lastActionAt = Date.now();
+    rememberPersistentGoal(action);
     _bot._currentTask = `cortex:${action.name}`;
 
     try {
@@ -982,6 +1121,11 @@ async function cortexTick() {
       releaseLock(action.name);
       if (_bot._currentTask === `cortex:${action.name}`) {
         _bot._currentTask = null;
+      }
+      if (isMaintenanceAction(action.name)) {
+        // Keep current long-term goal intact across background maintenance ticks.
+      } else if (action.name === _state.persistentGoal && !shouldKeepPersistentGoal()) {
+        clearPersistentGoal(action.name);
       }
     }
   } catch (err) {
@@ -997,7 +1141,7 @@ function getTickInterval() {
   for (const tier of TICK_SPEEDS) {
     if (score < tier.maxScore) return tier.intervalMs;
   }
-  return 12000;
+  return 3000;
 }
 
 function scheduleNextTick() {
@@ -1039,7 +1183,12 @@ function start(bot, options = {}) {
   };
   bot.on('death', _state._onDeath);
 
-  // Start the tick loop
+  // Start quickly after spawn, then continue on the normal tick loop.
+  setTimeout(() => {
+    if (_running) {
+      cortexTick().catch(err => warn(`Initial tick error: ${err.message}`));
+    }
+  }, 1000);
   scheduleNextTick();
   log('Cortex started — unified brain loop active.');
 }

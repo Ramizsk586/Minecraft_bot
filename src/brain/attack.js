@@ -172,6 +172,13 @@ function isAttackableEntity(bot, entity, options = {}) {
   const owner = options.owner?.toLowerCase();
   if (owner && entity.username?.toLowerCase() === owner) return false;
 
+  if (!options.allowPassive) {
+    const name = entity.name || '';
+    if (!HOSTILE_MOBS.includes(name) && entity.type !== 'player') {
+      return false;
+    }
+  }
+
   return true;
 }
 

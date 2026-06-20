@@ -5,6 +5,8 @@
 // Integrates with eat.js (craft bread when hungry) and attack.js/defance.js
 // (craft weapon/armor before combat).
 
+const { collectDrops, findBestTool } = require('../utils');
+
 // ─── Material Tiers ───────────────────────────────────────────────────────────
 // Ordered best → worst. The brain tries the best tier first and falls back.
 
@@ -136,6 +138,71 @@ function findAnyOf(bot, names) {
 
 function hasItem(bot, name, count = 1) {
   return countItem(bot, name) >= count;
+}
+
+function getTierInfoByName(name = '') {
+  return MATERIAL_TIERS.find(t => name.startsWith(`${t.tier}_`)) || null;
+}
+
+function getOwnedTieredItem(bot, itemType) {
+  for (const t of MATERIAL_TIERS) {
+    if (t.tier === 'netherite') continue;
+    const fullName = `${t.tier}_${itemType}`;
+    const item = findItemSlot(bot, fullName);
+    if (item) return { tier: t, item };
+  }
+  return null;
+}
+
+function getEquippedArmorTier(bot, armorType) {
+  const slotMap = { helmet: 5, chestplate: 6, leggings: 7, boots: 8 };
+  const equipped = bot.inventory.slots[slotMap[armorType]];
+  if (!equipped) return null;
+  return getTierInfoByName(equipped.name);
+}
+
+function getBestCraftableTier(bot, itemType, count = 1) {
+  for (const t of MATERIAL_TIERS) {
+    if (t.tier === 'netherite') continue;
+    const fullName = `${t.tier}_${itemType}`;
+    const steps = resolveDependencies(bot, fullName, count);
+    if (steps) return { tier: t, fullName, steps };
+  }
+  return null;
+}
+
+function trackTemporaryStation(bot, kind, position) {
+  if (!position) return;
+  if (!bot._temporaryStations) bot._temporaryStations = {};
+  bot._temporaryStations[kind] = position.clone ? position.clone() : position;
+}
+
+async function cleanupTemporaryStation(bot, kind, goals, options = {}) {
+  const position = bot._temporaryStations?.[kind];
+  if (!position) return false;
+
+  const block = bot.blockAt(position);
+  if (!block || block.name !== kind) {
+    delete bot._temporaryStations[kind];
+    return false;
+  }
+
+  try {
+    const { GoalNear } = goals || require('mineflayer-pathfinder').goals;
+    await bot.pathfinder.goto(new GoalNear(position.x, position.y, position.z, 3));
+  } catch {}
+
+  try {
+    const tool = findBestTool(bot, block.name);
+    if (tool) await bot.equip(tool, 'hand').catch(() => {});
+    await bot.dig(block, true);
+    await collectDrops(bot, goals || require('mineflayer-pathfinder').goals, 250, { maxDistance: 10, maxItems: 8, passes: 2 });
+    delete bot._temporaryStations[kind];
+    return true;
+  } catch (err) {
+    if (!options.silent) console.log(`Temporary ${kind} cleanup failed: ${err.message}`);
+    return false;
+  }
 }
 
 // ─── Dependency Resolver ──────────────────────────────────────────────────────
@@ -363,6 +430,7 @@ async function ensureCraftingTable(bot, goals) {
   // First check if nearby
   const tableId = bot.registry.blocksByName['crafting_table']?.id;
   let table = bot.findBlock({ matching: tableId, maxDistance: 32 });
+  let placedTemporary = false;
 
   if (!table) {
     // Try to craft one if we have planks
@@ -413,6 +481,7 @@ async function ensureCraftingTable(bot, goals) {
           bot.chat('📦 Placed crafting table.');
           // Re-find it
           table = bot.findBlock({ matching: tableId, maxDistance: 8 });
+          placedTemporary = !!table;
         }
       } catch (err) {
         console.log(`Couldn't place crafting table: ${err.message}`);
@@ -433,6 +502,11 @@ async function ensureCraftingTable(bot, goals) {
     ));
   } catch (err) {
     console.log(`Couldn't reach crafting table: ${err.message}`);
+  }
+
+  if (table && placedTemporary) {
+    table._temporaryStation = true;
+    trackTemporaryStation(bot, 'crafting_table', table.position);
   }
 
   return table;
@@ -514,6 +588,7 @@ async function craft(bot, itemName, count = 1, options = {}) {
   });
 
   let table = null;
+  let temporaryTableUsed = false;
   if (needsTable) {
     const { goals } = require('mineflayer-pathfinder');
     table = await ensureCraftingTable(bot, goals);
@@ -521,6 +596,7 @@ async function craft(bot, itemName, count = 1, options = {}) {
       if (!silent) bot.chat('Need a crafting table but can\'t find or make one!');
       return { success: false, crafted: null, steps: 0, reason: 'no crafting table' };
     }
+    temporaryTableUsed = !!table?._temporaryStation;
   }
 
   // Execute each step
@@ -679,53 +755,60 @@ async function craftFoodIfPossible(bot, options = {}) {
 async function ensureWeapon(bot) {
   const attackBrain = require('./attack');
   const best = attackBrain.pickBestWeapon(bot);
-  if (best && best.score > 5) return best; // Already have a good weapon
+  const craftableSword = getBestCraftableTier(bot, 'sword', 1);
+  const currentTier = getTierInfoByName(best?.item?.name || '');
+  if (best && best.score > 5 && (!craftableSword || (currentTier && currentTier.level >= craftableSword.tier.level))) {
+    return best;
+  }
 
-  // Try to craft a sword
-  const result = await craftBestTiered(bot, 'sword', 1, { silent: true });
+  const result = craftableSword
+    ? await craft(bot, craftableSword.fullName, 1, { silent: true })
+    : await craftBestTiered(bot, 'sword', 1, { silent: true });
   if (result.success) {
-    console.log(`🧠 Brain:Craft auto-crafted ${result.crafted} for combat`);
+    console.log('Brain:Craft auto-crafted ' + result.crafted + ' for combat');
     return attackBrain.pickBestWeapon(bot);
   }
 
-  return best; // Return whatever we had
+  return best;
 }
 
 /**
  * Ensure bot has armor. Called by defense brain.
  */
 async function ensureArmor(bot) {
-  const armorSlots = [5, 6, 7, 8]; // head, chest, legs, feet
   const armorTypes = ['helmet', 'chestplate', 'leggings', 'boots'];
   const crafted = [];
 
-  for (let i = 0; i < armorSlots.length; i++) {
-    const equipped = bot.inventory.slots[armorSlots[i]];
-    if (equipped) continue; // Already wearing something
+  for (const armorType of armorTypes) {
+    const equippedTier = getEquippedArmorTier(bot, armorType);
+    const owned = getOwnedTieredItem(bot, armorType);
+    const craftable = getBestCraftableTier(bot, armorType, 1);
+    const ownedLevel = Math.max(owned?.tier?.level || 0, equippedTier?.level || 0);
+    const targetLevel = craftable?.tier?.level || 0;
 
-    // Check inventory for armor to equip
-    const existing = findAnyOf(bot, MATERIAL_TIERS.filter(t => t.tier !== 'netherite').map(t => `${t.tier}_${armorTypes[i]}`));
-    if (existing) {
+    if (owned && ownedLevel >= targetLevel) {
       try {
-        const dest = armorTypes[i] === 'helmet' ? 'head' :
-                     armorTypes[i] === 'chestplate' ? 'torso' :
-                     armorTypes[i] === 'leggings' ? 'legs' : 'feet';
-        await bot.equip(existing, dest);
+        const dest = armorType === 'helmet' ? 'head' :
+                     armorType === 'chestplate' ? 'torso' :
+                     armorType === 'leggings' ? 'legs' : 'feet';
+        await bot.equip(owned.item, dest);
       } catch {}
       continue;
     }
 
-    // Try to craft
-    const result = await craftBestTiered(bot, armorTypes[i], 1, { silent: true });
+    const result = craftable
+      ? await craft(bot, craftable.fullName, 1, { silent: true })
+      : await craftBestTiered(bot, armorType, 1, { silent: true });
     if (result.success) {
-      crafted.push(result.crafted);
-      // Auto-equip
+      if (!owned || owned.item.name !== result.crafted) {
+        crafted.push(result.crafted);
+      }
       const item = findItemSlot(bot, result.crafted);
       if (item) {
         try {
-          const dest = armorTypes[i] === 'helmet' ? 'head' :
-                       armorTypes[i] === 'chestplate' ? 'torso' :
-                       armorTypes[i] === 'leggings' ? 'legs' : 'feet';
+          const dest = armorType === 'helmet' ? 'head' :
+                       armorType === 'chestplate' ? 'torso' :
+                       armorType === 'leggings' ? 'legs' : 'feet';
           await bot.equip(item, dest);
         } catch {}
       }

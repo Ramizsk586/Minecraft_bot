@@ -4,6 +4,16 @@
 // food based on current hunger deficit — no AI round-trip needed.
 
 const cookData = require('../library/cook');
+const libraryData = require('../library/data');
+const { collectDrops } = require('../utils');
+
+const HUNTABLE_PASSIVE_MOBS = new Set([
+  'cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom',
+]);
+
+const HUNT_DROP_NAMES = new Set([
+  'raw_beef', 'raw_porkchop', 'raw_mutton', 'raw_chicken', 'raw_rabbit',
+]);
 
 // ─── Complete Minecraft Food Database ─────────────────────────────────────────
 // Each entry: { hunger, saturation, harmful, effect }
@@ -237,6 +247,70 @@ function shouldCookBeforeEating(bot, options = {}) {
   return !!cookData.getBestCookableFood(bot);
 }
 
+function findNearestFoodAnimal(bot, maxDistance = 24) {
+  return bot.nearestEntity(entity => {
+    if (!entity || !entity.isValid || entity.type === 'object') return false;
+    if (!HUNTABLE_PASSIVE_MOBS.has(entity.name)) return false;
+    const info = libraryData.getMobInfo(entity.name);
+    if (!info || info.type !== 'passive') return false;
+    return entity.position.distanceTo(bot.entity.position) <= maxDistance;
+  });
+}
+
+async function huntPassiveFood(bot, options = {}) {
+  const { silent = false } = options;
+  const target = findNearestFoodAnimal(bot, 24);
+  if (!target) {
+    return { success: false, reason: 'no passive food animal nearby' };
+  }
+
+  try {
+    const attackBrain = require('./attack');
+    const { goals } = require('mineflayer-pathfinder');
+    const beforeCounts = {};
+    for (const name of HUNT_DROP_NAMES) {
+      beforeCounts[name] = bot.inventory.items()
+        .filter(item => item.name === name)
+        .reduce((sum, item) => sum + item.count, 0);
+    }
+
+    if (!silent) {
+      bot.chat(`Hunting ${target.name} for food.`);
+    }
+
+    const started = await attackBrain.startAttack(bot, target, { allowPassive: true });
+    if (!started?.started) {
+      return { success: false, reason: started?.reason || 'could not start hunt' };
+    }
+
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 12000) {
+      if (!target.isValid) break;
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    attackBrain.stopAttack(bot, { silent: true });
+    await collectDrops(bot, goals, 400, { maxDistance: 12, maxItems: 10, passes: 2 });
+
+    const gained = [];
+    for (const name of HUNT_DROP_NAMES) {
+      const after = bot.inventory.items()
+        .filter(item => item.name === name)
+        .reduce((sum, item) => sum + item.count, 0);
+      const diff = after - (beforeCounts[name] || 0);
+      if (diff > 0) gained.push(`${name} x${diff}`);
+    }
+
+    if (gained.length === 0) {
+      return { success: false, reason: 'hunt finished but no meat collected' };
+    }
+
+    return { success: true, reason: 'food hunted', drops: gained };
+  } catch (err) {
+    return { success: false, reason: err.message };
+  }
+}
+
 /**
  * Execute eating — equip and consume the best food. Returns immediately,
  * no LLM call needed.
@@ -295,7 +369,19 @@ async function eat(bot, options = {}) {
       console.log('🧠 Brain:Eat craft-food failed: ' + err.message);
     }
     if (!best) {
-      if (!silent) bot.chat('No food in inventory and nothing to craft!');
+      const shouldHuntCook = !force && bot.health >= 12 && foodBefore >= 8 && threatLevel === 'none';
+      const huntResult = await huntPassiveFood(bot, { silent }).catch(err => ({ success: false, reason: err.message }));
+      if (huntResult.success) {
+        if (shouldHuntCook) {
+          try {
+            await require('../cook').cookBestFood(bot);
+          } catch {}
+        }
+        best = pickBestFood(bot) || pickBestImmediateFood(bot, { allowHarmful: foodBefore <= 6 || force });
+      }
+    }
+    if (!best) {
+      if (!silent) bot.chat('No food in inventory, nothing craftable, and no meat source found!');
       return { ate: false, item: null, foodBefore, foodAfter: foodBefore };
     }
   }
@@ -403,6 +489,7 @@ module.exports = {
   calculateEfficiency,
   rankFoods,
   pickBestFood,
+  huntPassiveFood,
   eat,
   foodReport,
   startAutoEat,

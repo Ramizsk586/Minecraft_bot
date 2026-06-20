@@ -1,6 +1,6 @@
 const { Vec3 } = require('vec3');
 const cookData = require('../library/cook');
-const { sleep } = require('../utils');
+const { sleep, collectDrops } = require('../utils');
 
 function findNearbyCookingBlock(bot) {
   const names = ['smoker', 'blast_furnace', 'furnace'];
@@ -61,12 +61,49 @@ async function ensureFurnacePlaced(bot) {
       await bot.equip(furnaceItem, 'hand');
       await bot.placeBlock(placeOn, new Vec3(0, 1, 0));
       await sleep(400);
-      return bot.blockAt(targetPos);
+      const placed = bot.blockAt(targetPos);
+      if (placed) {
+        bot._temporaryCookingFurnace = placed.position.clone();
+      }
+      return placed;
     }
   } catch (err) {
     console.log(`[Cooking] Place furnace failed: ${err.message}`);
   }
   return null;
+}
+
+async function collectTemporaryFurnace(bot) {
+  if (!bot._temporaryCookingFurnace) return false;
+
+  const furnacePos = bot._temporaryCookingFurnace;
+  const furnaceBlock = bot.blockAt(furnacePos);
+  if (!furnaceBlock || furnaceBlock.name !== 'furnace') {
+    bot._temporaryCookingFurnace = null;
+    return false;
+  }
+
+  try {
+    const { goals } = require('mineflayer-pathfinder');
+    await bot.pathfinder.goto(new goals.GoalNear(furnacePos.x, furnacePos.y, furnacePos.z, 3));
+  } catch {}
+
+  try {
+    const { findBestTool } = require('../utils');
+    const tool = findBestTool(bot, furnaceBlock.name);
+    if (tool) {
+      await bot.equip(tool, 'hand').catch(() => {});
+    }
+    await bot.dig(furnaceBlock, true);
+    const { goals } = require('mineflayer-pathfinder');
+    await collectDrops(bot, goals, 250, { maxDistance: 10, maxItems: 8, passes: 2 });
+  } catch (err) {
+    console.log(`[Cooking] Failed to collect temporary furnace: ${err.message}`);
+    return false;
+  }
+
+  bot._temporaryCookingFurnace = null;
+  return true;
 }
 
 async function ensureFuel(bot) {
@@ -106,8 +143,11 @@ async function smeltItem(bot, inputName, count = 1) {
     const furnace = await bot.openFurnace(station);
     await furnace.putInput(input.type, input.metadata, Math.min(input.count, count));
     await furnace.putFuel(fuel.type, fuel.metadata, Math.max(1, Math.ceil(count / 8)));
+    await furnace.takeOutput().catch(() => {});
     furnace.close();
-    return { success: true, reason: 'smelting started', station: station.name };
+    await sleep(1200);
+    await collectTemporaryFurnace(bot).catch(() => {});
+    return { success: true, reason: 'smelting completed', station: station.name };
   } catch (err) {
     return { success: false, reason: err.message };
   }
@@ -140,6 +180,7 @@ function cookingReport(bot) {
 module.exports = {
   findNearbyCookingBlock,
   ensureFurnacePlaced,
+  collectTemporaryFurnace,
   smeltItem,
   cookBestFood,
   smeltBestOre,

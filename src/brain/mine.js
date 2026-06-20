@@ -10,11 +10,11 @@ const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
 const craftBrain = require('./craft');
 const libraryData = require('../library/data');
+const biom = require('../biom/index');  // biome plan registry
 
-const LOG_TYPES = [
-  'oak_log', 'spruce_log', 'birch_log', 'jungle_log',
-  'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log',
-];
+const LOG_TYPES = craftBrain.LOG_TYPES.filter(name =>
+  name.endsWith('_log') || name.endsWith('_stem')
+);
 
 const SOFT_BLOCKS = new Set([
   'grass_block', 'dirt', 'coarse_dirt', 'podzol', 'mud', 'sand', 'red_sand',
@@ -123,8 +123,8 @@ function bestTierName(bot, type) {
   return null;
 }
 
-function findTreeRoot(bot) {
-  const ids = LOG_TYPES
+function findTreeRoot(bot, logTypes = LOG_TYPES) {
+  const ids = logTypes
     .map(name => bot.registry.blocksByName[name]?.id)
     .filter(id => id != null);
 
@@ -134,14 +134,14 @@ function findTreeRoot(bot) {
   let pos = nearestLog.position.clone();
   while (true) {
     const below = bot.blockAt(pos.offset(0, -1, 0));
-    if (!below || !LOG_TYPES.includes(below.name)) break;
+    if (!below || !logTypes.includes(below.name)) break;
     pos = pos.offset(0, -1, 0);
   }
 
   return bot.blockAt(pos);
 }
 
-function findConnectedLogs(bot, rootBlock) {
+function findConnectedLogs(bot, rootBlock, logTypes = LOG_TYPES) {
   if (!rootBlock) return [];
 
   const visited = new Set();
@@ -155,7 +155,7 @@ function findConnectedLogs(bot, rootBlock) {
     visited.add(key);
 
     const block = bot.blockAt(pos);
-    if (!block || !LOG_TYPES.includes(block.name)) continue;
+    if (!block || !logTypes.includes(block.name)) continue;
     found.push(block);
 
     const offsets = [
@@ -174,10 +174,9 @@ function findConnectedLogs(bot, rootBlock) {
   return found.sort((a, b) => a.position.y - b.position.y);
 }
 
-function findWholeTree(bot, rootBlock) {
+function findWholeTree(bot, rootBlock, logTypes = LOG_TYPES) {
   if (!rootBlock) return [];
 
-  const rootName = rootBlock.name;
   const visited = new Set();
   const queue = [rootBlock.position.clone()];
   const found = [];
@@ -189,7 +188,7 @@ function findWholeTree(bot, rootBlock) {
     visited.add(key);
 
     const block = bot.blockAt(pos);
-    if (!block || block.name !== rootName) continue;
+    if (!block || !logTypes.includes(block.name)) continue;
     found.push(block);
 
     for (let dx = -1; dx <= 1; dx++) {
@@ -242,9 +241,26 @@ async function holdDigBlock(bot, block) {
   if (!block) return false;
 
   try {
-    const distance = bot.entity.position.distanceTo(block.position.offset(0.5, 0.5, 0.5));
-    if (distance > 4.5 || !bot.canDigBlock(block)) {
-      await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 3));
+    // Use horizontal distance only — don't try to pathfind to the exact Y of
+    // a high-up log (that causes "Took too long to decide path to goal" loops).
+    const botPos   = bot.entity.position;
+    const horizDist = Math.sqrt(
+      Math.pow(botPos.x - (block.position.x + 0.5), 2) +
+      Math.pow(botPos.z - (block.position.z + 0.5), 2)
+    );
+    const vertDist  = Math.abs(botPos.y - block.position.y);
+    const totalDist = bot.entity.position.distanceTo(block.position.offset(0.5, 0.5, 0.5));
+
+    // Only re-navigate if we are genuinely far away horizontally,
+    // or if the block is at the same height and out of reach.
+    const needsNav = (horizDist > 3.5) || (vertDist <= 1 && totalDist > 4.5);
+
+    if (needsNav) {
+      // Navigate to the XZ of the block at the bot's CURRENT Y (ground level).
+      // This avoids pathfinder trying to climb to mid-air log positions.
+      await bot.pathfinder.goto(
+        new goals.GoalNear(block.position.x, botPos.y, block.position.z, 2)
+      );
     }
 
     const fresh = bot.blockAt(block.position);
@@ -261,6 +277,7 @@ async function holdDigBlock(bot, block) {
     console.log(`Brain:Mine holdDigBlock failed: ${err.message}`);
     return false;
   }
+
 }
 
 async function retreatFromThreats(bot, report) {
@@ -344,18 +361,61 @@ async function ensureProgression(bot) {
   return results;
 }
 
-async function cutTreeSafely(bot, options = {}) {
+async function wanderToTree(bot, options = {}, logTypes = LOG_TYPES) {
+  const ids = logTypes
+    .map(name => bot.registry.blocksByName[name]?.id)
+    .filter(id => id != null);
+
+  // Already have a tree nearby? Use it immediately
+  const quick = bot.findBlock({ matching: ids, maxDistance: 64 });
+  if (quick) return { success: true, block: quick };
+
+  const pos = bot.entity.position.clone();
+  const maxAttempts = 12;
+  let searchRadius = 32;
+
+  console.log(`[Mine] wanderToTree: no [${logTypes[0]}...] nearby, beginning exploration...`);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Expand radius each attempt so bot moves further if needed
+    if (attempt > 0) searchRadius = Math.min(32 + attempt * 20, 256);
+
+    const angle = (attempt / maxAttempts) * Math.PI * 2 + Math.random() * 0.8;
+    const tx = Math.floor(pos.x + Math.cos(angle) * searchRadius);
+    const tz = Math.floor(pos.z + Math.sin(angle) * searchRadius);
+
+    console.log(`[Mine] wanderToTree attempt ${attempt + 1}/${maxAttempts}: moving to (${tx}, ${tz}), radius=${searchRadius}`);
+
+    try {
+      const walkGoal = new goals.GoalNear(tx, bot.entity.position.y, tz, 4);
+      await bot.pathfinder.goto(walkGoal);
+    } catch {
+      // Navigation blocked — just check from current spot
+    }
+
+    const found = bot.findBlock({ matching: ids, maxDistance: 64 });
+    if (found) {
+      console.log(`[Mine] wanderToTree: found ${found.name} at (${found.position.x}, ${found.position.y}, ${found.position.z})`);
+      return { success: true, block: found };
+    }
+  }
+
+  console.log(`[Mine] wanderToTree: exhausted search, no matching wood found.`);
+  return { success: false, reason: 'no tree found after wandering' };
+}
+
+async function cutTreeSafely(bot, options = {}, logTypes = LOG_TYPES) {
   const report = scanThreatLevel(bot, options);
   if (report.level === 'high') {
     return { success: false, reason: 'area too dangerous' };
   }
 
-  const root = findTreeRoot(bot);
+  const root = findTreeRoot(bot, logTypes);
   if (!root) {
     return { success: false, reason: 'no tree found' };
   }
 
-  const logs = findWholeTree(bot, root);
+  const logs = findWholeTree(bot, root, logTypes);
   if (logs.length === 0) {
     return { success: false, reason: 'no connected logs' };
   }
@@ -369,7 +429,8 @@ async function cutTreeSafely(bot, options = {}) {
   let chopped = 0;
   for (const log of logs) {
     const fresh = bot.blockAt(log.position);
-    if (!fresh || !LOG_TYPES.includes(fresh.name)) continue;
+    // Accept any log type in our list (not just overworld LOG_TYPES)
+    if (!fresh || (!logTypes.includes(fresh.name) && !LOG_TYPES.includes(fresh.name))) continue;
 
     const liveThreat = scanThreatLevel(bot, options);
     if (liveThreat.level === 'high') {
@@ -395,9 +456,18 @@ async function cutTreeSafely(bot, options = {}) {
 }
 
 async function mineSoftTargets(bot, options = {}) {
-  const candidates = ['grass_block', 'dirt', 'oak_log', 'spruce_log', 'birch_log'];
+  const biomeCandidates = biom.getProgressionBlocks(bot);
+  const candidates = [
+    ...biomeCandidates,
+    'grass_block',
+    'dirt',
+    ...biom.getLogTypes(bot),
+  ];
+  const seen = new Set();
 
   for (const name of candidates) {
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
     const block = bot.findBlock({
       matching: bot.registry.blocksByName[name]?.id,
       maxDistance: 24,
@@ -425,6 +495,7 @@ async function mineSoftTargets(bot, options = {}) {
 async function runMineDecision(bot, options = {}) {
   const state = ensureState(bot);
   const report = scanThreatLevel(bot, options);
+  const biomeLogTypes = biom.getLogTypes(bot);
 
   if (report.level === 'none') {
     const progression = await ensureProgression(bot);
@@ -432,7 +503,7 @@ async function runMineDecision(bot, options = {}) {
       return { success: true, reason: `progressed: ${progression.join(', ')}`, threat: report.level };
     }
 
-    const tree = await cutTreeSafely(bot, options);
+    const tree = await cutTreeSafely(bot, options, biomeLogTypes);
     if (tree.success) {
       await ensureProgression(bot);
       return { success: true, reason: `chopped ${tree.chopped} logs`, threat: report.level };
@@ -578,6 +649,7 @@ module.exports = {
   scanThreatLevel,
   ensureProgression,
   cutTreeSafely,
+  wanderToTree,
   mineSoftTargets,
   retreatFromThreats,
   fightOneByOne,

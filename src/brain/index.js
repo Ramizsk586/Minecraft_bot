@@ -7,7 +7,6 @@ const attackBrain = require('./attack');
 const defanceBrain = require('./defance');
 const craftBrain = require('./craft');
 const mineBrain = require('./mine');
-const surviveBrain = require('./survive');
 const chatBrain = require('./chat');
 const stuckBrain = require('./stuck');
 const swimBrain = require('./swim');
@@ -490,7 +489,6 @@ module.exports = {
   defance: defanceBrain,
   craft: craftBrain,
   mine: mineBrain,
-  survive: surviveBrain,
   chat: chatBrain,
   stuck: stuckBrain,
   swim: swimBrain,

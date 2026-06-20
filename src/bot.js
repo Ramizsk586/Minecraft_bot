@@ -13,19 +13,41 @@ const libraryData = require('./library/data');
 const libraryCalc = require('./library/modules/calc');
 const { resolveItemName } = require('./library/modules/itemNameResolver');
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+function envValue(name, fallback = '') {
+  const value = process.env[name];
+  return typeof value === 'string' ? value.trim() : fallback;
+}
+
+function buildLlmConfig() {
+  const provider = envValue('PROVIDER', 'openrouter').toLowerCase();
+  return {
+    provider,
+    llmApiBase: envValue('LLM_API_BASE') || (provider === 'ollama'
+      ? 'https://ollama.com/v1'
+      : 'https://openrouter.ai/api/v1'),
+    llmApiKey: envValue('MODEL_KEY') || envValue('LLM_API_KEY') || envValue('OPENROUTER_API_KEY'),
+    llmModel: envValue('LLM_MODEL') || (provider === 'ollama' ? 'llama3' : 'openai/gpt-4o-mini'),
+    llmReferer: envValue('OPENROUTER_SITE_URL'),
+    llmTitle: envValue('OPENROUTER_APP_NAME', 'Minecraft AI Bot'),
+  };
+}
+
+// ????????? Config ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+const llmConfig = buildLlmConfig();
 
 const config = {
-  host: process.env.MC_HOST || 'localhost',
-  port: parseInt(process.env.MC_PORT) || 25565,
-  username: process.env.MC_USERNAME || 'AIBot',
+  host: envValue('MC_HOST', 'localhost'),
+  port: parseInt(envValue('MC_PORT', '25565'), 10) || 25565,
+  username: envValue('MC_USERNAME', 'AIBot'),
   version: normalizeMinecraftVersion(process.env.MC_VERSION),
-  owner: process.env.OWNER_USERNAME || '',
-  llmApiBase: process.env.LLM_API_BASE || 'https://openrouter.ai/api/v1',
-  llmApiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || '',
-  llmModel: process.env.LLM_MODEL || 'openai/gpt-4o-mini',
-  llmReferer: process.env.OPENROUTER_SITE_URL || '',
-  llmTitle: process.env.OPENROUTER_APP_NAME || 'Minecraft AI Bot',
+  owner: envValue('OWNER_USERNAME'),
+  provider: llmConfig.provider,
+  llmApiBase: llmConfig.llmApiBase,
+  llmApiKey: llmConfig.llmApiKey,
+  llmModel: llmConfig.llmModel,
+  llmReferer: llmConfig.llmReferer,
+  llmTitle: llmConfig.llmTitle,
 };
 
 const MAX_AI_EMPTY_RETRIES = 2;
@@ -307,7 +329,7 @@ GUIDELINES:
 
 async function askAI(username, userMessage) {
   if (!config.llmApiKey) {
-    throw new Error('Missing LLM_API_KEY or OPENROUTER_API_KEY');
+    throw new Error('Missing MODEL_KEY (or legacy LLM_API_KEY / OPENROUTER_API_KEY)');
   }
 
   const worldState = getWorldState(bot);
@@ -325,14 +347,20 @@ async function askAI(username, userMessage) {
   let raw = '';
 
   for (let attempt = 0; attempt <= MAX_AI_EMPTY_RETRIES; attempt++) {
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    if (config.llmApiKey) {
+      headers['Authorization'] = `Bearer ${config.llmApiKey}`;
+    }
+    if (config.provider !== 'ollama') {
+      if (config.llmReferer) headers['HTTP-Referer'] = config.llmReferer;
+      if (config.llmTitle) headers['X-Title'] = config.llmTitle;
+    }
+
     const response = await fetch(`${config.llmApiBase}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.llmApiKey}`,
-        'Content-Type': 'application/json',
-        ...(config.llmReferer ? { 'HTTP-Referer': config.llmReferer } : {}),
-        ...(config.llmTitle ? { 'X-Title': config.llmTitle } : {}),
-      },
+      headers,
       body: JSON.stringify({
         model: config.llmModel,
         max_tokens: 1024,
@@ -378,11 +406,6 @@ async function askAI(username, userMessage) {
 
 async function handleCommand(username, command) {
   bot.lastInteractionTime = Date.now();
-
-  // If autonomy was active, abort it immediately
-  if (brain.survive && brain.survive.isActive()) {
-    brain.survive.abort(bot);
-  }
 
   if (command === 'help') {
     bot.chat('Commands: !<natural language> | !stop | !status | !reset | !commands');
