@@ -5,9 +5,28 @@ const { goals } = require('mineflayer-pathfinder');
 
 const basicModule = require('./basic');
 const buildingModule = require('./building');
+const builderModule = require('./builder');
 const inventoryModule = require('./inventory');
 const miningModule = require('./mining');
 const farmingModule = require('./farming');
+
+/**
+ * Extract handlers from a module's register() result.
+ * Supports both { handlers: {...} } and raw { actionName: fn } return styles.
+ */
+function extractHandlers(registered) {
+  if (registered && registered.handlers && typeof registered.handlers === 'object') {
+    return registered.handlers;
+  }
+  // Filter out non-function properties (like setExecutor)
+  const handlers = {};
+  for (const [key, val] of Object.entries(registered)) {
+    if (typeof val === 'function') {
+      handlers[key] = val;
+    }
+  }
+  return handlers;
+}
 
 /**
  * Initialize all action modules and return a unified executeAction function.
@@ -18,18 +37,22 @@ function createExecutor(bot) {
   // Register all modules
   const basic = basicModule.register(bot, goals);
   const building = buildingModule.register(bot, goals);
+  const builder = builderModule.register(bot, goals);
   const inventory = inventoryModule.register(bot, goals);
   const mining = miningModule.register(bot, goals);
   const farming = farmingModule.register(bot, goals);
 
-  // Merge all handlers into a single map
+  // Merge all handlers into a single map (handles both return patterns)
   const allHandlers = {
-    ...basic.handlers,
-    ...building.handlers,
-    ...inventory.handlers,
-    ...mining.handlers,
-    ...farming.handlers,
+    ...extractHandlers(basic),
+    ...extractHandlers(building),
+    ...extractHandlers(builder),
+    ...extractHandlers(inventory),
+    ...extractHandlers(mining),
+    ...extractHandlers(farming),
   };
+
+  console.log(`📋 Action dispatcher loaded ${Object.keys(allHandlers).length} actions: ${Object.keys(allHandlers).join(', ')}`);
 
   // The unified executor
   async function executeAction(action) {

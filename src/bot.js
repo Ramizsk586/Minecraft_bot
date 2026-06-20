@@ -2,9 +2,10 @@ require('dotenv').config();
 const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 
-const { normalizeMinecraftVersion, extractJson, findBestFood, sleep } = require('./utils');
+const { normalizeMinecraftVersion, extractJson, sleep } = require('./utils');
 const { getWorldState } = require('./worldState');
 const { createExecutor } = require('./actions/index');
+const brain = require('./brain/index');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,6 @@ let bot;
 let conversationHistory = [];
 let isThinking = false;
 let executeAction = null;
-let autoEatInterval = null;
 
 // ─── Create Bot ───────────────────────────────────────────────────────────────
 
@@ -43,6 +43,7 @@ function createBot() {
 
   // Custom state property used by action modules
   bot._currentTask = null;
+  bot.lastInteractionTime = Date.now();
 
   bot.once('spawn', () => {
     console.log(`✅ ${config.username} spawned in the world`);
@@ -51,9 +52,10 @@ function createBot() {
 
     // Initialize the action executor with all modules
     executeAction = createExecutor(bot);
+    bot.executeAction = executeAction;
 
-    // Start auto-eat background loop
-    startAutoEat();
+    // Initialize the brain (auto-eat, instant command handling, autonomous survival)
+    brain.init(bot, { owner: config.owner });
 
     bot.chat(`Hello! I'm ${config.username}, your AI assistant. Type !help to see what I can do.`);
   });
@@ -64,6 +66,10 @@ function createBot() {
       bot.chat(`Sorry ${username}, only ${config.owner} can command me.`);
       return;
     }
+
+    // Any message from the owner resets the idle timer
+    bot.lastInteractionTime = Date.now();
+
     if (!message.startsWith('!')) return;
 
     const command = message.slice(1).trim();
@@ -83,33 +89,11 @@ function createBot() {
   bot.on('end', () => {
     console.log('Disconnected. Reconnecting in 5s...');
     bot._currentTask = null;
-    if (autoEatInterval) clearInterval(autoEatInterval);
+    brain.shutdown();
     setTimeout(createBot, 5000);
   });
 }
 
-// ─── Auto Eat ─────────────────────────────────────────────────────────────────
-
-function startAutoEat() {
-  if (autoEatInterval) clearInterval(autoEatInterval);
-
-  autoEatInterval = setInterval(async () => {
-    try {
-      // Only auto-eat when food is low and we're not busy
-      if (bot.food <= 14 && !isThinking) {
-        const food = findBestFood(bot);
-        if (food) {
-          console.log(`🍖 Auto-eating ${food.name} (food level: ${bot.food}/20)`);
-          await bot.equip(food, 'hand');
-          await bot.consume();
-        }
-      }
-    } catch (err) {
-      // Silently ignore auto-eat errors (might be mid-action)
-      console.log('Auto-eat skipped:', err.message);
-    }
-  }, 30000); // Check every 30 seconds
-}
 
 // ─── AI Decision Engine ───────────────────────────────────────────────────────
 
@@ -117,6 +101,8 @@ const SYSTEM_PROMPT = `You are an AI agent controlling a Minecraft bot named ${c
 You can see the current world state and must decide what actions to take.
 
 You respond ONLY with a JSON object. No extra text, no markdown, just valid JSON.
+
+IMPORTANT: Simple tasks like eating, crafting tools, crafting food, and gearing up are handled INSTANTLY by the bot's built-in brain. For those, just use a "chat" action to tell the player you're doing it — the brain intercepts the command before the LLM is even called. Focus on complex multi-step tasks that require planning.
 
 Available actions:
 
@@ -135,6 +121,9 @@ Available actions:
 - {"action": "place", "block": "block_name", "x": number, "y": number, "z": number}
 - {"action": "build", "block": "block_name", "x": number, "y": number, "z": number, "width": number, "height": number, "depth": number, "type": "walls|floor|solid|shell"}
 - {"action": "fill", "block": "block_name", "x1": number, "y1": number, "z1": number, "x2": number, "y2": number, "z2": number}
+- {"action": "house", "style": "basic|cottage|bunker", "x": number, "y": number, "z": number}
+- {"action": "wall", "block": "block_name", "x1": number, "y": number, "z1": number, "x2": number, "y2": number, "z2": number, "height": number}
+- {"action": "clear", "x1": number, "y1": number, "z1": number, "x2": number, "y2": number, "z2": number}
 
 === MINING & WOOD ===
 - {"action": "mine", "block": "block_name", "count": number}
@@ -164,11 +153,13 @@ GUIDELINES:
 - For multi-step tasks, use "sequence" to chain actions.
 - Always pick the most logical action given the world state and inventory.
 - If the player asks to build something, calculate approximate coordinates relative to the bot's position.
-- For mining, prefer the correct tool. The bot will auto-equip the best tool available.
-- If the bot is hungry (food < 14), prioritize eating before other tasks.
+- If the player asks for a house, use "house" action with a style. Use coordinates near the bot.
+- For mining, prefer the correct tool. The bot auto-equips the best tool.
+- The bot auto-eats when hungry, auto-crafts weapons before combat, and auto-equips armor.
 - If the task is impossible or you need clarification, use "chat" to explain why.
-- When building structures, use "build" with type "walls" for houses, "floor" for platforms, etc.
-- For farming, use "create_farm" to set up new farms, "harvest" with replant for ongoing harvesting.`;
+- When building structures, use "build" with type "walls" for custom sizes, or "house" for preset buildings.
+- For farming, use "create_farm" to set up new farms, "harvest" with replant for ongoing harvesting.
+- For clearing land, use "clear" to remove all blocks in an area before building.`;
 
 async function askAI(username, userMessage) {
   if (!config.llmApiKey) {
@@ -229,9 +220,17 @@ async function askAI(username, userMessage) {
 // ─── Command Handler ──────────────────────────────────────────────────────────
 
 async function handleCommand(username, command) {
+  bot.lastInteractionTime = Date.now();
+
+  // If autonomy was active, abort it immediately
+  if (brain.survive && brain.survive.isActive()) {
+    brain.survive.abort(bot);
+  }
+
   if (command === 'help') {
     bot.chat('Commands: !<natural language> | !stop | !status | !reset | !commands');
-    bot.chat('Examples: !mine 10 stone | !build a house | !chop trees | !create a wheat farm');
+    bot.chat('Instant: !eat | !craft <item> | !gear up | !food report | !craft report');
+    bot.chat('Examples: !mine 10 stone | !build a house | !chop trees | !craft diamond sword');
     return;
   }
 
@@ -257,11 +256,13 @@ async function handleCommand(username, command) {
   }
 
   if (command === 'commands') {
-    bot.chat('Actions: mine, strip_mine, chop_tree, gather_wood');
-    bot.chat('Actions: place, build, fill');
-    bot.chat('Actions: deposit, deposit_all, withdraw, inventory_list');
-    bot.chat('Actions: create_farm, plant, harvest, farm_cycle, auto_eat');
-    bot.chat('Actions: goto, follow, attack, craft, equip, eat, collect');
+    bot.chat('⚡ Instant (brain): eat, craft <item>, make planks, make sticks, gear up');
+    bot.chat('⚡ Instant (brain): food report, craft report, attack, defend');
+    bot.chat('🔨 Build: place, build, fill, house, wall, clear');
+    bot.chat('⛏️ Gather: mine, strip_mine, chop_tree, gather_wood');
+    bot.chat('📦 Items: deposit, withdraw, deposit_all, inventory_list');
+    bot.chat('🌾 Farm: create_farm, plant, harvest, farm_cycle');
+    bot.chat('🤖 Auto: bot auto-eats, auto-equips armor, auto-crafts gear');
     return;
   }
 
@@ -270,6 +271,19 @@ async function handleCommand(username, command) {
     return;
   }
 
+  // ── Brain intercept: handle simple commands instantly ──
+  try {
+    const handled = await brain.tryHandle(bot, command);
+    if (handled) {
+      console.log(`🧠 Brain handled: "${command}"`);
+      return;
+    }
+  } catch (err) {
+    console.log(`🧠 Brain error: ${err.message}`);
+    // Fall through to LLM
+  }
+
+  // ── LLM path: complex commands ──
   bot.chat(`Thinking about: "${command}"...`);
   isThinking = true;
   bot._currentTask = command;
@@ -296,6 +310,7 @@ async function handleCommand(username, command) {
   } finally {
     isThinking = false;
     if (bot._currentTask === command) bot._currentTask = null;
+    bot.lastInteractionTime = Date.now();
   }
 }
 
