@@ -1,0 +1,141 @@
+// ─── Shared Utilities ─────────────────────────────────────────────────────────
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeMinecraftVersion(version) {
+  const value = (version || '').trim();
+  if (!value || value.toLowerCase() === 'auto') return false;
+  return value;
+}
+
+function extractJson(raw) {
+  const clean = raw.replace(/```json|```/g, '').trim();
+
+  try {
+    return JSON.parse(clean);
+  } catch {
+    const match = clean.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON object found in model response');
+    return JSON.parse(match[0]);
+  }
+}
+
+// ─── Tool Selection Helpers ───────────────────────────────────────────────────
+
+const TOOL_FOR_BLOCK = {
+  // Pickaxe blocks
+  stone: 'pickaxe', cobblestone: 'pickaxe', deepslate: 'pickaxe',
+  granite: 'pickaxe', diorite: 'pickaxe', andesite: 'pickaxe',
+  coal_ore: 'pickaxe', iron_ore: 'pickaxe', gold_ore: 'pickaxe',
+  diamond_ore: 'pickaxe', emerald_ore: 'pickaxe', lapis_ore: 'pickaxe',
+  redstone_ore: 'pickaxe', copper_ore: 'pickaxe', nether_quartz_ore: 'pickaxe',
+  deepslate_coal_ore: 'pickaxe', deepslate_iron_ore: 'pickaxe',
+  deepslate_gold_ore: 'pickaxe', deepslate_diamond_ore: 'pickaxe',
+  deepslate_emerald_ore: 'pickaxe', deepslate_lapis_ore: 'pickaxe',
+  deepslate_redstone_ore: 'pickaxe', deepslate_copper_ore: 'pickaxe',
+  obsidian: 'pickaxe', netherrack: 'pickaxe', basalt: 'pickaxe',
+  sandstone: 'pickaxe', red_sandstone: 'pickaxe',
+  bricks: 'pickaxe', nether_bricks: 'pickaxe',
+  end_stone: 'pickaxe', purpur_block: 'pickaxe',
+  terracotta: 'pickaxe', prismarine: 'pickaxe',
+  furnace: 'pickaxe', blast_furnace: 'pickaxe', smoker: 'pickaxe',
+  // Axe blocks
+  oak_log: 'axe', spruce_log: 'axe', birch_log: 'axe',
+  jungle_log: 'axe', acacia_log: 'axe', dark_oak_log: 'axe',
+  mangrove_log: 'axe', cherry_log: 'axe',
+  oak_planks: 'axe', spruce_planks: 'axe', birch_planks: 'axe',
+  jungle_planks: 'axe', acacia_planks: 'axe', dark_oak_planks: 'axe',
+  crafting_table: 'axe', chest: 'axe', barrel: 'axe',
+  bookshelf: 'axe',
+  // Shovel blocks
+  dirt: 'shovel', grass_block: 'shovel', sand: 'shovel',
+  gravel: 'shovel', clay: 'shovel', soul_sand: 'shovel',
+  soul_soil: 'shovel', red_sand: 'shovel', podzol: 'shovel',
+  mycelium: 'shovel', mud: 'shovel', snow: 'shovel',
+  snow_block: 'shovel', farmland: 'shovel',
+  // Hoe blocks
+  hay_block: 'hoe', dried_kelp_block: 'hoe',
+  target: 'hoe', shroomlight: 'hoe',
+  // Shears
+  cobweb: 'shears',
+};
+
+const TOOL_TIERS = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'wooden'];
+
+/**
+ * Find the best tool in inventory for a given block name.
+ * Returns the inventory item or null.
+ */
+function findBestTool(bot, blockName) {
+  const toolType = TOOL_FOR_BLOCK[blockName];
+  if (!toolType) return null;
+
+  const items = bot.inventory.items();
+  for (const tier of TOOL_TIERS) {
+    const toolName = `${tier}_${toolType}`;
+    const found = items.find(i => i.name === toolName);
+    if (found) return found;
+  }
+  return null;
+}
+
+// ─── Food Priority ────────────────────────────────────────────────────────────
+
+const FOOD_PRIORITY = [
+  'enchanted_golden_apple', 'golden_apple', 'golden_carrot',
+  'cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_salmon',
+  'cooked_cod', 'cooked_chicken', 'cooked_rabbit',
+  'bread', 'baked_potato', 'beetroot_soup', 'mushroom_stew',
+  'pumpkin_pie', 'cake', 'cookie', 'melon_slice',
+  'sweet_berries', 'apple', 'carrot', 'potato',
+  'dried_kelp', 'beetroot',
+  'raw_beef', 'raw_porkchop', 'raw_mutton', 'raw_chicken',
+  'raw_cod', 'raw_salmon', 'raw_rabbit',
+  'rotten_flesh', 'spider_eye',
+];
+
+/**
+ * Find the best food item in inventory.
+ */
+function findBestFood(bot) {
+  const items = bot.inventory.items();
+  for (const foodName of FOOD_PRIORITY) {
+    const found = items.find(i => i.name === foodName);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Wait briefly then collect nearby dropped items by walking to them.
+ */
+async function collectDrops(bot, goals, waitMs = 600) {
+  await sleep(waitMs);
+  const nearby = Object.values(bot.entities).filter(
+    e => e.name === 'item' && e.position.distanceTo(bot.entity.position) < 8
+  );
+  for (const item of nearby.slice(0, 10)) {
+    try {
+      await bot.pathfinder.goto(new goals.GoalNear(
+        item.position.x, item.position.y, item.position.z, 1
+      ));
+    } catch {
+      // item may have been picked up already
+    }
+    await sleep(200);
+  }
+}
+
+module.exports = {
+  sleep,
+  normalizeMinecraftVersion,
+  extractJson,
+  findBestTool,
+  findBestFood,
+  collectDrops,
+  TOOL_FOR_BLOCK,
+  TOOL_TIERS,
+  FOOD_PRIORITY,
+};
