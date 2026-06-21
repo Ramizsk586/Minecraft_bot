@@ -67,6 +67,10 @@ async function smeltBestOre(bot) {
   return cookController.smeltBestOre(bot);
 }
 
+function makeItem(itemName, count = 1) {
+  return data.makeItem(itemName, count);
+}
+
 module.exports = {
   gatherLogs,
   mineBlock,
@@ -80,4 +84,5 @@ module.exports = {
   getSmeltableOre,
   cookBestFood,
   smeltBestOre,
+  makeItem,
 };

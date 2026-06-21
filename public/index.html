@@ -3,23 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minecraft AI Bot Console</title>
+    <title>Minecraft AI Bot Manager</title>
     <script src="/socket.io/socket.io.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #0b0b0d;
-            --bg-card: #121215;
-            --bg-input: #1a1a1f;
-            --border: rgba(255, 255, 255, 0.08);
-            --border-focus: rgba(255, 255, 255, 0.2);
-            --text-primary: #f3f3f5;
-            --text-secondary: #8b8b93;
+            --bg-main: #060608;
+            --bg-card: #0d0d12;
+            --bg-sidebar: #0a0a0d;
+            --bg-input: #121217;
+            --border: rgba(255, 255, 255, 0.05);
+            --border-focus: rgba(255, 255, 255, 0.15);
+            --text-primary: #f8f9fa;
+            --text-secondary: #8c8d99;
             --accent-green: #10b981;
             --accent-red: #ef4444;
             --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
             --accent-yellow: #f59e0b;
             --font-main: 'Plus Jakarta Sans', sans-serif;
             --font-mono: 'JetBrains Mono', monospace;
@@ -35,14 +37,13 @@
             font-family: var(--font-main);
             background: var(--bg-main);
             color: var(--text-primary);
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
             display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
         }
 
-        /* Scrollbar styling */
+        /* Scrollbars */
         ::-webkit-scrollbar {
             width: 6px;
             height: 6px;
@@ -51,285 +52,294 @@
             background: transparent;
         }
         ::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.08);
             border-radius: 4px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15);
         }
 
-        header {
-            padding: 16px 24px;
-            background: var(--bg-card);
-            border-bottom: 1px solid var(--border);
+        /* App Layout Container */
+        .app-container {
             display: flex;
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* Sidebar styling */
+        .sidebar {
+            width: 220px;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
             justify-content: space-between;
-            align-items: center;
+            padding: 20px 12px;
+            flex-shrink: 0;
         }
 
-        .header-title-container {
+        .sidebar-brand {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
+            margin-bottom: 24px;
+            padding-left: 6px;
         }
 
         .logo-mark {
             width: 10px;
             height: 10px;
-            background: var(--text-primary);
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
             transform: rotate(45deg);
+            box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
         }
 
-        h1 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            letter-spacing: -0.02em;
+        .sidebar-brand h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            background: linear-gradient(to right, #fff, #b5b5c0);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+        }
+
+        .nav-item {
+            width: 100%;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-family: var(--font-main);
+            font-size: 0.82rem;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.15s ease;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.02);
             color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            color: var(--text-primary);
+        }
+
+        .nav-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            color: var(--text-secondary);
+            transition: color 0.15s ease;
+        }
+
+        .nav-item.active .nav-icon {
+            color: var(--accent-purple);
+        }
+
+        .nav-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .sidebar-footer {
+            border-top: 1px solid var(--border);
+            padding-top: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .connection-status {
             display: flex;
             align-items: center;
             gap: 8px;
-            font-size: 0.85rem;
+            font-size: 0.76rem;
             font-weight: 500;
             color: var(--text-secondary);
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
             background: var(--accent-red);
-            position: relative;
         }
 
         .status-dot.online {
             background: var(--accent-green);
-            box-shadow: 0 0 10px var(--accent-green);
+            box-shadow: 0 0 6px var(--accent-green);
             animation: pulse 2s infinite;
         }
 
         @keyframes pulse {
-            0% {
-                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
-            }
-            70% {
-                box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-            }
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
 
+        /* Main Content Container */
+        .main-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            min-width: 0;
+        }
+
+        /* Page/Tab Panes */
+        .tab-pane {
+            display: none;
+            height: 100%;
+            flex-direction: column;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .tab-pane.active {
+            display: flex;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .page-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 16px;
+        }
+
+        /* Grid Cards Layout */
         .dashboard-grid {
             display: grid;
-            grid-template-columns: 320px 1fr 400px;
-            gap: 20px;
-            padding: 24px;
-            flex: 1;
-            height: calc(100vh - 65px);
-            align-items: stretch;
-            min-height: 0;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
         }
 
-        @media (max-width: 1200px) {
+        @media (max-width: 900px) {
             .dashboard-grid {
                 grid-template-columns: 1fr;
-                height: auto;
-                overflow: visible;
             }
         }
 
-        .panel {
+        .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 12px;
+            border-radius: 8px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
-            min-height: 0;
-            overflow: hidden;
         }
 
-        .panel-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .panel-title {
-            font-size: 0.9rem;
+        .card-header {
+            font-size: 0.78rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--text-secondary);
-        }
-
-        .panel-content {
-            padding: 20px;
-            overflow-y: auto;
-            flex: 1;
-        }
-
-        /* Panel 1: Stats & Controls */
-        .stat-card {
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 16px;
             margin-bottom: 12px;
+        }
+
+        /* Stats bars */
+        .stat-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .stat-meta {
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            font-size: 0.82rem;
+            font-weight: 500;
         }
 
-        .stat-label {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-
-        .stat-value {
-            font-size: 0.95rem;
-            font-weight: 600;
-        }
-
-        .stat-value.task {
-            max-width: 160px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: var(--accent-blue);
-        }
-
-        .bar-container {
+        .bar-outer {
             width: 100%;
             height: 6px;
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.02);
             border-radius: 3px;
             overflow: hidden;
-            margin-top: 4px;
+            border: 1px solid var(--border);
         }
 
-        .bar {
+        .bar-inner {
             height: 100%;
             border-radius: 3px;
             transition: width 0.3s ease;
         }
 
-        .bar.health {
-            background: var(--accent-red);
-        }
+        .bar-inner.health { background: var(--accent-red); }
+        .bar-inner.food { background: var(--accent-yellow); }
 
-        .bar.food {
-            background: var(--accent-yellow);
-        }
-
-        .control-input {
-            width: 100%;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            color: var(--text-primary);
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-family: var(--font-main);
-            font-size: 0.9rem;
-            margin-top: 16px;
-            transition: border-color 0.2s;
-        }
-
-        .control-input:focus {
-            outline: none;
-            border-color: var(--border-focus);
-        }
-
-        .action-button {
-            width: 100%;
-            padding: 10px;
-            border-radius: 8px;
-            border: none;
-            font-family: var(--font-main);
-            font-size: 0.9rem;
-            font-weight: 500;
-            cursor: pointer;
-            margin-top: 12px;
-            transition: opacity 0.2s;
-        }
-
-        .action-button.stop {
-            background: var(--accent-red);
-            color: white;
-        }
-
-        .action-button:hover {
-            opacity: 0.9;
-        }
-
-        /* Panel 2: Inventory Grid */
-        .inventory-grid {
+        .stat-details {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-            gap: 12px;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 4px;
         }
 
-        .inventory-item-card {
+        .stat-badge {
             background: var(--bg-input);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px;
+            padding: 10px 12px;
+            border-radius: 6px;
             display: flex;
             flex-direction: column;
-            position: relative;
-            min-height: 80px;
-            justify-content: space-between;
+            gap: 2px;
         }
 
-        .item-slot {
+        .stat-badge-label {
             font-size: 0.7rem;
             color: var(--text-secondary);
-            font-family: var(--font-mono);
         }
 
-        .item-name {
-            font-size: 0.85rem;
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-top: 4px;
-            color: var(--text-primary);
+        .stat-badge-value {
+            font-size: 0.88rem;
+            font-weight: 600;
         }
 
-        .item-count-badge {
-            align-self: flex-end;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid var(--border);
-            font-family: var(--font-mono);
-            font-size: 0.8rem;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-
-        .empty-inventory {
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            padding: 40px 0;
-        }
-
-        /* Panel 3: Terminal Console */
-        .terminal {
-            font-family: var(--font-mono);
-            font-size: 0.8rem;
-            background: #08080a;
-            border-radius: 8px;
-            padding: 16px;
+        /* Terminal styling */
+        .terminal-container {
             flex: 1;
-            overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            background: #040406;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            min-height: 380px;
+        }
+
+        .terminal-logs {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
 
         .log-entry {
@@ -337,120 +347,460 @@
             word-break: break-all;
         }
 
-        .log-time {
+        .log-time { color: var(--text-secondary); margin-right: 8px; }
+        .log-tag { font-weight: 600; margin-right: 8px; }
+        
+        .log-entry.chat .log-tag { color: var(--accent-blue); }
+        .log-entry.command .log-tag { color: var(--accent-green); }
+        .log-entry.error .log-tag { color: var(--accent-red); }
+        .log-entry.info .log-tag { color: var(--text-secondary); }
+
+        .log-text { color: #e4e4e7; }
+
+        .terminal-input-bar {
+            padding: 12px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 10px;
+        }
+
+        .cmd-input {
+            flex: 1;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            padding: 8px 12px;
+            font-family: var(--font-main);
+            font-size: 0.82rem;
+            transition: all 0.15s;
+        }
+
+        .cmd-input:focus {
+            outline: none;
+            border-color: var(--border-focus);
+        }
+
+        .btn {
+            background: var(--accent-purple);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-family: var(--font-main);
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+        .btn.stop { background: var(--accent-red); }
+
+        /* Inventory Grid */
+        .inventory-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 12px;
+        }
+
+        .inventory-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 80px;
+            position: relative;
+        }
+
+        .inv-slot {
+            font-size: 0.68rem;
+            font-family: var(--font-mono);
             color: var(--text-secondary);
-            margin-right: 8px;
         }
 
-        .log-type {
-            font-weight: 500;
-            margin-right: 8px;
+        .inv-name {
+            font-size: 0.82rem;
+            font-weight: 600;
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        .log-entry.chat .log-type { color: var(--accent-blue); }
-        .log-entry.command .log-type { color: var(--accent-green); }
-        .log-entry.error .log-type { color: var(--accent-red); }
-        .log-entry.info .log-type { color: var(--text-secondary); }
+        .inv-count {
+            align-self: flex-end;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            font-size: 0.76rem;
+            font-family: var(--font-mono);
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-top: 6px;
+        }
 
-        .log-text {
-            color: #d1d1d6;
+        .empty-inv {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 60px 0;
+            font-size: 0.88rem;
+        }
+
+        /* Crafting Grid */
+        .crafting-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 12px;
+        }
+
+        .recipe-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 140px;
+        }
+
+        .recipe-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .recipe-name {
+            font-size: 0.88rem;
+            font-weight: 600;
+        }
+
+        .recipe-tag {
+            font-size: 0.68rem;
+            background: rgba(59, 130, 246, 0.08);
+            color: var(--accent-blue);
+            padding: 1px 5px;
+            border-radius: 3px;
+            border: 1px solid rgba(59, 130, 246, 0.15);
+        }
+
+        .recipe-ingredients {
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        /* Settings pane */
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 900px) {
+            .settings-grid { grid-template-columns: 1fr; }
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .form-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .form-control {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-family: var(--font-main);
+            font-size: 0.82rem;
+            width: 100%;
+        }
+
+        .form-control.persona-prompt {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.4;
+            resize: vertical;
+            min-height: 140px;
         }
     </style>
 </head>
 <body>
 
-    <header>
-        <div class="header-title-container">
-            <div class="logo-mark"></div>
-            <h1 id="bot-name-title">Minecraft AI Console</h1>
-        </div>
-        <div class="connection-status">
-            <div id="status-indicator" class="status-dot"></div>
-            <span id="status-text">Disconnected</span>
-        </div>
-    </header>
-
-    <div class="dashboard-grid">
-        <!-- Panel 1: Stats & Control -->
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Bot Metrics & Controls</span>
-            </div>
-            <div class="panel-content">
-                <div class="stat-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span class="stat-label">Health</span>
-                        <span class="stat-value" id="health-value">20/20</span>
-                    </div>
-                    <div class="bar-container">
-                        <div class="bar health" id="health-bar" style="width: 100%;"></div>
-                    </div>
+    <div class="app-container">
+        <!-- Sidebar Navigation on Left -->
+        <aside class="sidebar">
+            <div class="sidebar-container">
+                <div class="sidebar-brand">
+                    <div class="logo-mark"></div>
+                    <h2>Bot Manager</h2>
                 </div>
-
-                <div class="stat-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span class="stat-label">Food</span>
-                        <span class="stat-value" id="food-value">20/20</span>
-                    </div>
-                    <div class="bar-container">
-                        <div class="bar food" id="food-bar" style="width: 100%;"></div>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <span class="stat-label">Coordinates</span>
-                    <span class="stat-value" id="coords-value">0, 0, 0</span>
-                </div>
-
-                <div class="stat-card">
-                    <span class="stat-label">Active Task</span>
-                    <span class="stat-value task" id="task-value">Idle</span>
-                </div>
-
-                <input type="text" id="command-input" class="control-input" placeholder="Type chat or !command..." />
                 
-                <button id="stop-btn" class="action-button stop">Stop Task</button>
+                <nav class="sidebar-nav">
+                    <button class="nav-item active" data-tab="dashboard">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="7" height="9" />
+                                <rect x="14" y="3" width="7" height="5" />
+                                <rect x="14" y="12" width="7" height="9" />
+                                <rect x="3" y="16" width="7" height="5" />
+                            </svg>
+                        </span>
+                        Dashboard
+                    </button>
+                    <button class="nav-item" data-tab="terminal">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="4 17 10 11 4 5" />
+                                <line x1="12" y1="19" x2="20" y2="19" />
+                            </svg>
+                        </span>
+                        Terminal Logs
+                    </button>
+                    <button class="nav-item" data-tab="inventory">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                                <line x1="12" y1="22.08" x2="12" y2="12" />
+                            </svg>
+                        </span>
+                        Inventory
+                    </button>
+                    <button class="nav-item" data-tab="crafting">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                            </svg>
+                        </span>
+                        Crafting & Builds
+                    </button>
+                    <button class="nav-item" data-tab="settings">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3" />
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                            </svg>
+                        </span>
+                        Settings & Persona
+                    </button>
+                </nav>
             </div>
-        </div>
 
-        <!-- Panel 2: Inventory -->
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Inventory Grid</span>
-            </div>
-            <div class="panel-content" id="inventory-container">
-                <div class="empty-inventory">Empty inventory</div>
-            </div>
-        </div>
-
-        <!-- Panel 3: Console Logs -->
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Live Terminal Logs</span>
-            </div>
-            <div class="panel-content" style="display: flex; flex-direction: column;">
-                <div class="terminal" id="terminal-logs">
-                    <!-- Logs populated via socket -->
+            <div class="sidebar-footer">
+                <div class="connection-status">
+                    <div id="status-indicator" class="status-dot"></div>
+                    <span id="status-text">Disconnected</span>
                 </div>
             </div>
-        </div>
+        </aside>
+
+        <!-- Main Panel Content on Right -->
+        <main class="main-content">
+            <!-- 1. Dashboard Tab -->
+            <section id="tab-dashboard" class="tab-pane active">
+                <h1 class="page-title" id="bot-name-title">Bot Dashboard</h1>
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <span class="card-header">Vitals & Status</span>
+                        <div class="stat-row">
+                            <div class="stat-meta">
+                                <span>Health</span>
+                                <span id="health-value">20/20</span>
+                            </div>
+                            <div class="bar-outer">
+                                <div class="bar-inner health" id="health-bar" style="width: 100%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="stat-row">
+                            <div class="stat-meta">
+                                <span>Food / Hunger</span>
+                                <span id="food-value">20/20</span>
+                            </div>
+                            <div class="bar-outer">
+                                <div class="bar-inner food" id="food-bar" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <span class="card-header">Telemetry</span>
+                        <div class="stat-details">
+                            <div class="stat-badge">
+                                <span class="stat-badge-label">Coordinates</span>
+                                <span class="stat-badge-value" id="coords-value">0, 0, 0</span>
+                            </div>
+                            <div class="stat-badge">
+                                <span class="stat-badge-label">Active Task</span>
+                                <span class="stat-badge-value" id="task-value" style="color: var(--accent-blue);">Idle</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <span class="card-header">Quick Action Panel</span>
+                    <div style="display: flex; gap: 12px; max-width: 400px;">
+                        <button id="stop-btn" class="btn stop">Halt Pathfinder & Stop Task</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Terminal Tab -->
+            <section id="tab-terminal" class="tab-pane">
+                <h1 class="page-title">Live Terminal Logs</h1>
+                <div class="terminal-container">
+                    <div class="terminal-logs" id="terminal-logs">
+                        <!-- Filled by socket.io -->
+                    </div>
+                    <div class="terminal-input-bar">
+                        <input type="text" id="command-input" class="cmd-input" placeholder="Type a chat message or !command..." />
+                        <button id="send-cmd-btn" class="btn">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Inventory Tab -->
+            <section id="tab-inventory" class="tab-pane">
+                <h1 class="page-title">Inventory Slots</h1>
+                <div id="inventory-container">
+                    <div class="empty-inv">No items in inventory</div>
+                </div>
+            </section>
+
+            <!-- 4. Crafting & Builds Tab -->
+            <section id="tab-crafting" class="tab-pane">
+                <h1 class="page-title">Quick Crafting Panel</h1>
+                <div class="crafting-grid">
+                    <!-- Standard craft triggers -->
+                    <div class="recipe-card">
+                        <div class="recipe-header">
+                            <span class="recipe-name">Bread</span>
+                            <span class="recipe-tag">Food</span>
+                        </div>
+                        <span class="recipe-ingredients">Requires: Wheat x3</span>
+                        <button class="btn" onclick="triggerCommand('!craft bread 1')">Craft 1x Bread</button>
+                    </div>
+
+                    <div class="recipe-card">
+                        <div class="recipe-header">
+                            <span class="recipe-name">Wooden Pickaxe</span>
+                            <span class="recipe-tag">Tool</span>
+                        </div>
+                        <span class="recipe-ingredients">Requires: Wood Planks x3, Sticks x2</span>
+                        <button class="btn" onclick="triggerCommand('!craft wooden_pickaxe 1')">Craft 1x Pickaxe</button>
+                    </div>
+
+                    <div class="recipe-card">
+                        <div class="recipe-header">
+                            <span class="recipe-name">Stone Pickaxe</span>
+                            <span class="recipe-tag">Tool</span>
+                        </div>
+                        <span class="recipe-ingredients">Requires: Cobblestone x3, Sticks x2</span>
+                        <button class="btn" onclick="triggerCommand('!craft stone_pickaxe 1')">Craft 1x Pickaxe</button>
+                    </div>
+
+                    <div class="recipe-card">
+                        <div class="recipe-header">
+                            <span class="recipe-name">Iron Pickaxe</span>
+                            <span class="recipe-tag">Tool</span>
+                        </div>
+                        <span class="recipe-ingredients">Requires: Iron Ingots x3, Sticks x2</span>
+                        <button class="btn" onclick="triggerCommand('!craft iron_pickaxe 1')">Craft 1x Pickaxe</button>
+                    </div>
+
+                    <div class="recipe-card">
+                        <div class="recipe-header">
+                            <span class="recipe-name">Crafting Table</span>
+                            <span class="recipe-tag">Utility</span>
+                        </div>
+                        <span class="recipe-ingredients">Requires: Wood Planks x4</span>
+                        <button class="btn" onclick="triggerCommand('!craft crafting_table 1')">Craft Table</button>
+                    </div>
+
+                    <div class="recipe-card">
+                        <div class="recipe-header">
+                            <span class="recipe-name">Shield</span>
+                            <span class="recipe-tag">Defense</span>
+                        </div>
+                        <span class="recipe-ingredients">Requires: Wood Planks x6, Iron Ingot x1</span>
+                        <button class="btn" onclick="triggerCommand('!craft shield 1')">Craft Shield</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. Settings Tab -->
+            <section id="tab-settings" class="tab-pane">
+                <h1 class="page-title">Configuration & Persona</h1>
+                <div class="settings-grid">
+                    <div class="card">
+                        <span class="card-header">Server Details</span>
+                        <div class="form-group">
+                            <label class="form-label">Minecraft Server Host</label>
+                            <input type="text" class="form-control" id="settings-host" readonly value="localhost" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Port</label>
+                            <input type="text" class="form-control" id="settings-port" readonly value="25565" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Owner Username</label>
+                            <input type="text" class="form-control" id="settings-owner" readonly value="N/A" />
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <span class="card-header">AI Persona prompt</span>
+                        <div class="form-group">
+                            <label class="form-label">Current Persona System prompt (Editable via .env)</label>
+                            <textarea class="form-control persona-prompt" id="settings-persona" readonly>Loading persona...</textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script>
         const socket = io();
+
+        // UI Tabs Switching
+        const navItems = document.querySelectorAll('.nav-item');
+        const tabPanes = document.querySelectorAll('.tab-pane');
+
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                // Remove active classes
+                navItems.forEach(n => n.classList.remove('active'));
+                tabPanes.forEach(p => p.classList.remove('active'));
+
+                // Set current item active
+                item.classList.add('active');
+                const targetTab = item.getAttribute('data-tab');
+                document.getElementById(`tab-${targetTab}`).classList.add('active');
+            });
+        });
+
+        // Connection Indicator
         const statusIndicator = document.getElementById('status-indicator');
         const statusText = document.getElementById('status-text');
         const botNameTitle = document.getElementById('bot-name-title');
-        const healthValue = document.getElementById('health-value');
-        const healthBar = document.getElementById('health-bar');
-        const foodValue = document.getElementById('food-value');
-        const foodBar = document.getElementById('food-bar');
-        const coordsValue = document.getElementById('coords-value');
-        const taskValue = document.getElementById('task-value');
-        const commandInput = document.getElementById('command-input');
-        const stopBtn = document.getElementById('stop-btn');
-        const inventoryContainer = document.getElementById('inventory-container');
-        const terminalLogs = document.getElementById('terminal-logs');
 
         socket.on('connect', () => {
             statusIndicator.className = 'status-dot online';
@@ -462,11 +812,26 @@
             statusText.innerText = 'Disconnected';
         });
 
+        // State update
+        const healthValue = document.getElementById('health-value');
+        const healthBar = document.getElementById('health-bar');
+        const foodValue = document.getElementById('food-value');
+        const foodBar = document.getElementById('food-bar');
+        const coordsValue = document.getElementById('coords-value');
+        const taskValue = document.getElementById('task-value');
+        const inventoryContainer = document.getElementById('inventory-container');
+        
+        // Settings panel
+        const settingsHost = document.getElementById('settings-host');
+        const settingsPort = document.getElementById('settings-port');
+        const settingsOwner = document.getElementById('settings-owner');
+        const settingsPersona = document.getElementById('settings-persona');
+
         socket.on('state', (state) => {
             if (!state || Object.keys(state).length === 0) return;
 
-            botNameTitle.innerText = `${state.username} console`;
-            
+            botNameTitle.innerText = `${state.username} Dashboard`;
+
             // Health
             const health = Math.round(state.health);
             healthValue.innerText = `${health}/20`;
@@ -483,59 +848,80 @@
             // Task
             taskValue.innerText = state.currentTask;
 
-            // Inventory
+            // Settings values
+            if (state.host) settingsHost.value = state.host;
+            if (state.port) settingsPort.value = state.port;
+            if (state.owner) settingsOwner.value = state.owner;
+            if (state.persona) settingsPersona.value = state.persona;
+
+            // Inventory Rendering
             if (state.inventory && state.inventory.length > 0) {
                 let html = '<div class="inventory-grid">';
                 state.inventory.forEach(item => {
                     html += `
-                        <div class="inventory-item-card">
-                            <div class="item-slot">Slot ${item.slot}</div>
-                            <div class="item-name" title="${item.name}">${item.name.replace(/_/g, ' ')}</div>
-                            <div class="item-count-badge">${item.count}</div>
+                        <div class="inventory-card">
+                            <span class="inv-slot">Slot ${item.slot}</span>
+                            <span class="inv-name" title="${item.name}">${item.name.replace(/_/g, ' ')}</span>
+                            <span class="inv-count">${item.count}</span>
                         </div>
                     `;
                 });
                 html += '</div>';
                 inventoryContainer.innerHTML = html;
             } else {
-                inventoryContainer.innerHTML = '<div class="empty-inventory">Inventory is empty</div>';
+                inventoryContainer.innerHTML = '<div class="empty-inv">Inventory is empty</div>';
             }
         });
 
-        // Command inputs
-        commandInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const cmd = commandInput.value.trim();
-                if (cmd) {
-                    socket.emit('command', cmd);
-                    commandInput.value = '';
-                }
+        // Trigger console command helper
+        function triggerCommand(cmd) {
+            if (!cmd) return;
+            socket.emit('command', cmd);
+        }
+
+        // Terminal text inputs
+        const commandInput = document.getElementById('command-input');
+        const sendCmdBtn = document.getElementById('send-cmd-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const terminalLogs = document.getElementById('terminal-logs');
+
+        function processCommandSend() {
+            const cmd = commandInput.value.trim();
+            if (cmd) {
+                triggerCommand(cmd);
+                commandInput.value = '';
             }
+        }
+
+        commandInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') processCommandSend();
         });
+
+        sendCmdBtn.addEventListener('click', processCommandSend);
 
         stopBtn.addEventListener('click', () => {
             socket.emit('stop');
         });
 
-        // Log handler
+        // Logs
         function appendLog(log) {
             const entry = document.createElement('div');
             entry.className = `log-entry ${log.type}`;
-            
+
             const timeSpan = document.createElement('span');
             timeSpan.className = 'log-time';
             timeSpan.innerText = log.time;
 
-            const typeSpan = document.createElement('span');
-            typeSpan.className = 'log-type';
-            typeSpan.innerText = `[${log.type.toUpperCase()}]`;
+            const tagSpan = document.createElement('span');
+            tagSpan.className = 'log-tag';
+            tagSpan.innerText = `[${log.type.toUpperCase()}]`;
 
             const textSpan = document.createElement('span');
             textSpan.className = 'log-text';
             textSpan.innerText = log.text;
 
             entry.appendChild(timeSpan);
-            entry.appendChild(typeSpan);
+            entry.appendChild(tagSpan);
             entry.appendChild(textSpan);
 
             terminalLogs.appendChild(entry);

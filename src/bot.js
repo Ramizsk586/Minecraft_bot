@@ -3,6 +3,8 @@ const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 const { plugin: pvp } = require('mineflayer-pvp');
 const armorManager = require('mineflayer-armor-manager');
+const { plugin: toolPlugin } = require('mineflayer-tool');
+const autoEat = require('mineflayer-auto-eat');
 
 const { normalizeMinecraftVersion, extractJson, sleep, installCompactChat } = require('./utils');
 const { getWorldState } = require('./worldState');
@@ -15,7 +17,13 @@ const libraryData = require('./library/data');
 const libraryCalc = require('./library/modules/calc');
 const { resolveItemName } = require('./library/modules/itemNameResolver');
 const miningRules = require('./brain/miningRules');
-const { startDashboardServer } = require('./dashboard/server');
+const { startDashboardServer, updateBotInstance } = require('./dashboard/server');
+const memory = require('./brain/memory');
+const recovery = require('./tasks/recovery');
+const modes = require('./brain/modes');
+const coder = require('./actions/coder');
+const pathfinderHooks = require('./utils/pathfinderHooks');
+const HudTracker = require('./brain/hudTracker');
 
 function envValue(name, fallback = '') {
   const value = process.env[name];
@@ -61,8 +69,8 @@ const MAX_AI_EMPTY_RETRIES = 2;
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let bot;
-let conversationHistory = [];
-let autonomyHistory = [];
+global.conversationHistory = [];
+global.autonomyHistory = [];
 let isThinking = false;
 let executeAction = null;
 let reconnectTimer = null;
@@ -183,6 +191,37 @@ function createBot() {
   bot.loadPlugin(pathfinder);
   bot.loadPlugin(pvp);
   bot.loadPlugin(armorManager);
+  bot.loadPlugin(toolPlugin);
+  bot.loadPlugin(autoEat);
+
+  bot._config = config;
+  updateBotInstance(bot);
+
+  // Dynamic override of bot.digTime to prevent server desyncs by forcing isInWater to false
+  bot.digTime = function (block) {
+    if (!block) return 0;
+    let type = null;
+    let enchantments = [];
+    const currentlyHeldItem = bot.heldItem;
+    if (currentlyHeldItem) {
+      type = currentlyHeldItem.type;
+      enchantments = currentlyHeldItem.enchants || [];
+    }
+    const headEquipmentSlot = bot.getEquipmentDestSlot('head');
+    const headEquippedItem = bot.inventory.slots[headEquipmentSlot];
+    if (headEquippedItem) {
+      enchantments = enchantments.concat(headEquippedItem.enchants || []);
+    }
+    const creative = bot.game.gameMode === 'creative';
+    return block.digTime(
+      type,
+      creative,
+      false, // isInWater forced to false
+      !bot.entity.onGround,
+      enchantments,
+      bot.entity.effects
+    );
+  };
 
   // Custom state property used by action modules
   bot._currentTask = null;
@@ -191,6 +230,18 @@ function createBot() {
   bot.once('spawn', () => {
     console.log(`✅ ${config.username} spawned in the world`);
     reconnectAttempt = 0;
+
+    if (bot.autoEat) {
+      bot.autoEat.options = {
+        priority: 'saturation',
+        startAt: 14,
+        bannedFood: ['rotten_flesh', 'spider_eye', 'pufferfish', 'poisonous_potato'],
+        eatingTimeout: 3000,
+        ignoreInventoryCheck: false,
+        checkOnParticles: true
+      };
+    }
+
     const defaultMove = new Movements(bot);
     defaultMove.canSwim = true;
     defaultMove.allowSprinting = true;
@@ -218,7 +269,17 @@ function createBot() {
     miningRules.init?.(bot);
     resolveItemName.init?.(bot);
     brain.init(bot, { owner: config.owner });
-    startDashboardServer(bot, 3000);
+
+    // Dynamic upgrades initialization
+    (async () => {
+      bot._llmConfig = llmConfig; // Save config reference
+      pathfinderHooks.applyHooks(bot);
+      bot._hudTracker = new HudTracker();
+      await memory.init(bot);
+      recovery.setupAutoRecovery(bot);
+      await recovery.loadAndRestoreSnapshot(bot);
+      modes.startModesLoop(bot);
+    })().catch(err => console.error('[Spawn Init] Error:', err.message));
 
     // Initialize the Task Manager if task env is set
     if (process.env.MC_TASK) {
@@ -291,7 +352,7 @@ function createBot() {
   bot.on('death', () => {
     console.log('💀 Bot died, respawning...');
     bot._currentTask = null;
-    conversationHistory = [];
+    global.conversationHistory = [];
     bot.chat('I died! Ready for new commands.');
   });
 
@@ -320,7 +381,10 @@ function createBot() {
 
 // ─── AI Decision Engine ───────────────────────────────────────────────────────
 
+const PERSONA = process.env.PERSONA || process.env.presona || '';
+
 const SYSTEM_PROMPT = `You are an AI agent controlling a Minecraft bot named ${config.username}. 
+${PERSONA ? `\n=== CHARACTER PERSONA ===\n${PERSONA}\n` : ''}
 You can see the current world state and must decide what actions to take.
 
 You respond ONLY with a JSON object. No extra text, no markdown, just valid JSON.
@@ -382,7 +446,21 @@ GUIDELINES:
 - Keep every "chat" message short: one compact sentence, under 80 characters.
 - When building structures, use "build" with type "walls" for custom sizes, or "build_house" for built-in JSON blueprints like home, farm, animal pen, cooking shack, storage hut, watch tower, and ironfarm.
 - For farming, use "create_farm" to set up new farms, "harvest" with replant for ongoing harvesting.
-- Use "house_plan" when you want to report the blueprint and materials before building.`;
+- Use "house_plan" when you want to report the blueprint and materials before building.
+
+=== MEMORY MANAGEMENT ===
+You can manage your persistent long-term memory by adding the "manage_memories" array at the root of your JSON response.
+Format:
+{
+  "action": "...",
+  ...,
+  "manage_memories": [
+    "ADD:text to remember",
+    "DELETE:MEM-shortId",
+    "UPDATE:MEM-shortId:new text to remember"
+  ]
+}
+Use memories to keep track of coordinates of key locations (chests, homes, farms), player agreements, or long-term plans.`;
 
 const AUTONOMY_PROMPT = `You are the autonomous supervisor for a Minecraft bot.
 Return ONLY one JSON action object. No markdown, no explanation.
@@ -445,22 +523,128 @@ const AUTONOMY_CRAFT_ITEMS = new Set([
   'iron_sword',
 ]);
 
+const responseSchema = {
+  name: "minecraft_action",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: [
+          "chat", "goto", "attack", "follow", "stop", "craft", "equip", "eat", "collect",
+          "place", "build", "fill", "house_plan", "build_house",
+          "mine", "strip_mine", "chop_tree", "gather_wood",
+          "deposit", "deposit_all", "withdraw", "inventory_list", "sort_inventory",
+          "create_farm", "plant", "harvest", "farm_cycle", "auto_eat", "craft_food",
+          "sequence"
+        ]
+      },
+      message: { type: "string" },
+      x: { type: "number" },
+      y: { type: "number" },
+      z: { type: "number" },
+      x1: { type: "number" },
+      y1: { type: "number" },
+      z1: { type: "number" },
+      x2: { type: "number" },
+      y2: { type: "number" },
+      z2: { type: "number" },
+      target: { type: "string" },
+      player: { type: "string" },
+      item: { type: "string" },
+      count: { type: "number" },
+      food_item: { type: "string" },
+      block: { type: "string" },
+      width: { type: "number" },
+      height: { type: "number" },
+      depth: { type: "number" },
+      type: { type: "string", enum: ["walls", "floor", "solid", "shell"] },
+      blueprint: { type: "string", enum: ["home", "farm", "animal_pen", "cooking_shack", "storage_hut", "watch_tower", "ironfarm"] },
+      facing: { type: "string", enum: ["north", "south", "east", "west"] },
+      direction: { type: "string", enum: ["north", "south", "east", "west"] },
+      length: { type: "number" },
+      replant: { type: "boolean" },
+      crop: { type: "string" },
+      keep: { type: "array", items: { type: "string" } },
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: [
+                "chat", "goto", "attack", "follow", "stop", "craft", "equip", "eat", "collect",
+                "place", "build", "fill", "house_plan", "build_house",
+                "mine", "strip_mine", "chop_tree", "gather_wood",
+                "deposit", "deposit_all", "withdraw", "inventory_list", "sort_inventory",
+                "create_farm", "plant", "harvest", "farm_cycle", "auto_eat", "craft_food"
+              ]
+            },
+            message: { type: "string" },
+            x: { type: "number" },
+            y: { type: "number" },
+            z: { type: "number" },
+            x1: { type: "number" },
+            y1: { type: "number" },
+            z1: { type: "number" },
+            x2: { type: "number" },
+            y2: { type: "number" },
+            z2: { type: "number" },
+            target: { type: "string" },
+            player: { type: "string" },
+            item: { type: "string" },
+            count: { type: "number" },
+            food_item: { type: "string" },
+            block: { type: "string" },
+            width: { type: "number" },
+            height: { type: "number" },
+            depth: { type: "number" },
+            type: { type: "string", enum: ["walls", "floor", "solid", "shell"] },
+            blueprint: { type: "string", enum: ["home", "farm", "animal_pen", "cooking_shack", "storage_hut", "watch_tower", "ironfarm"] },
+            facing: { type: "string", enum: ["north", "south", "east", "west"] },
+            direction: { type: "string", enum: ["north", "south", "east", "west"] },
+            length: { type: "number" },
+            replant: { type: "boolean" },
+            crop: { type: "string" }
+          },
+          required: ["action"],
+          additionalProperties: false
+        }
+      },
+      manage_memories: {
+        type: "array",
+        items: { type: "string" }
+      }
+    },
+    required: ["action"],
+    additionalProperties: false
+  }
+};
+
 async function askAI(username, userMessage) {
   if (!config.llmApiKey && config.provider !== 'ollama') {
     throw new Error('Missing MODEL_KEY (or legacy LLM_API_KEY / OPENROUTER_API_KEY)');
   }
 
-  const worldState = getWorldState(bot);
+  const statusUpdate = bot._hudTracker ? bot._hudTracker.generateDiff(bot) : getWorldState(bot);
 
-  conversationHistory.push({
+  global.conversationHistory.push({
     role: 'user',
-    content: `Player ${username} says: "${userMessage}"\n\n${worldState}`,
+    content: `Player ${username} says: "${userMessage}"\n\n${statusUpdate}`,
   });
 
   // Keep history to last 10 exchanges to avoid token bloat
-  if (conversationHistory.length > 20) {
-    conversationHistory = conversationHistory.slice(-20);
+  if (global.conversationHistory.length > 20) {
+    global.conversationHistory = global.conversationHistory.slice(-20);
   }
+
+  // Retrieve memories
+  const relevantMemories = await memory.searchRelevant(userMessage, 5);
+  const memoriesText = relevantMemories.length > 0
+    ? relevantMemories.map(r => `[${r.shortId}] ${r.text}`).join('\n')
+    : 'None';
 
   let raw = '';
 
@@ -476,17 +660,53 @@ async function askAI(username, userMessage) {
       if (config.llmTitle) headers['X-Title'] = config.llmTitle;
     }
 
+    // Assemble messages array optimizing for prefix caching (static system prompt + historical conversation prefix)
+    const messages = [
+      { 
+        role: 'system', 
+        content: SYSTEM_PROMPT,
+        // Enable Claude prompt caching if using Anthropic Claude models on OpenRouter
+        ...(config.llmModel.includes('anthropic') || config.llmModel.includes('claude') 
+          ? { cache_control: { type: 'ephemeral' } } 
+          : {})
+      }
+    ];
+
+    if (global.conversationHistory.length > 0) {
+      // Add all previous messages except the very last one we just added (the new query)
+      const previousHistory = global.conversationHistory.slice(0, -1);
+      messages.push(...previousHistory);
+      
+      // Inject the turn-specific dynamic context (memories)
+      messages.push({
+        role: 'system',
+        content: `[CONTEXT] Relevant memories retrieved:\n${memoriesText}`
+      });
+      
+      // Add the current user query (which is also dynamic)
+      messages.push(global.conversationHistory[global.conversationHistory.length - 1]);
+    } else {
+      if (relevantMemories.length > 0) {
+        messages.push({
+          role: 'system',
+          content: `[CONTEXT] Relevant memories retrieved:\n${memoriesText}`
+        });
+      }
+      messages.push(...global.conversationHistory);
+    }
+
     const response = await fetch(`${config.llmApiBase}/chat/completions`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         model: config.llmModel,
-        max_tokens: 1024,
+        max_tokens: 512, // Optimized down from 1024 (sufficient for any valid JSON action schema)
         temperature: 0.2,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...conversationHistory,
-        ],
+        messages,
+        response_format: {
+          type: "json_schema",
+          json_schema: responseSchema
+        }
       }),
     });
 
@@ -512,7 +732,7 @@ async function askAI(username, userMessage) {
     throw new Error(`LLM returned an empty response after ${MAX_AI_EMPTY_RETRIES + 1} attempts`);
   }
 
-  conversationHistory.push({
+  global.conversationHistory.push({
     role: 'assistant',
     content: raw,
   });
@@ -559,6 +779,60 @@ function sanitizeAutonomyAction(action, depth = 0) {
   return { action: action.action };
 }
 
+const autonomyResponseSchema = {
+  name: "autonomy_action",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["chat", "collect", "chop_tree", "gather_wood", "mine", "craft", "farm_cycle", "sequence"]
+      },
+      message: { type: "string" },
+      count: { type: "number" },
+      block: { type: "string", enum: ["stone", "cobblestone", "coal_ore", "iron_ore", "sand", "sandstone"] },
+      item: {
+        type: "string",
+        enum: [
+          "crafting_table", "stick", "torch", "furnace", "bread", "shield",
+          "wooden_pickaxe", "stone_pickaxe", "stone_sword", "stone_axe",
+          "iron_pickaxe", "iron_sword"
+        ]
+      },
+      replant: { type: "boolean" },
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["chat", "collect", "chop_tree", "gather_wood", "mine", "craft", "farm_cycle"]
+            },
+            message: { type: "string" },
+            count: { type: "number" },
+            block: { type: "string", enum: ["stone", "cobblestone", "coal_ore", "iron_ore", "sand", "sandstone"] },
+            item: {
+              type: "string",
+              enum: [
+                "crafting_table", "stick", "torch", "furnace", "bread", "shield",
+                "wooden_pickaxe", "stone_pickaxe", "stone_sword", "stone_axe",
+                "iron_pickaxe", "iron_sword"
+              ]
+            },
+            replant: { type: "boolean" }
+          },
+          required: ["action"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ["action"],
+    additionalProperties: false
+  }
+};
+
 async function askAutonomousAI(context = {}) {
   if (!config.llmApiKey && config.provider !== 'ollama') {
     return { action: 'chat', message: 'AI autonomy disabled: missing model key.' };
@@ -576,9 +850,9 @@ async function askAutonomousAI(context = {}) {
     JSON.stringify(context, null, 2),
   ].join('\n');
 
-  autonomyHistory.push({ role: 'user', content: prompt });
-  if (autonomyHistory.length > 8) {
-    autonomyHistory = autonomyHistory.slice(-8);
+  global.autonomyHistory.push({ role: 'user', content: prompt });
+  if (global.autonomyHistory.length > 8) {
+    global.autonomyHistory = global.autonomyHistory.slice(-8);
   }
 
   const headers = { 'Content-Type': 'application/json' };
@@ -599,8 +873,12 @@ async function askAutonomousAI(context = {}) {
       temperature: 0.15,
       messages: [
         { role: 'system', content: AUTONOMY_PROMPT },
-        ...autonomyHistory,
+        ...global.autonomyHistory,
       ],
+      response_format: {
+        type: "json_schema",
+        json_schema: autonomyResponseSchema
+      }
     }),
   });
 
@@ -612,7 +890,7 @@ async function askAutonomousAI(context = {}) {
   const data = await response.json();
   const raw = data?.choices?.[0]?.message?.content?.trim() || '';
   if (!raw) throw new Error('Autonomy LLM returned empty plan');
-  autonomyHistory.push({ role: 'assistant', content: raw });
+  global.autonomyHistory.push({ role: 'assistant', content: raw });
 
   const parsed = extractJson(raw);
   return sanitizeAutonomyAction(parsed);
@@ -636,7 +914,9 @@ async function runAIAutonomy(context = {}) {
     const action = await askAutonomousAI(context);
     if (!action) return { success: false, reason: 'unsafe or invalid plan' };
     console.log('AI autonomy action:', JSON.stringify(action));
-    await executeAction(action);
+    await coder.execute(bot, async () => {
+      await executeAction(action);
+    });
     return { success: true, action };
   } catch (err) {
     aiAutonomyState.lastErrorAt = Date.now();
@@ -664,8 +944,7 @@ async function handleCommand(username, command) {
   }
 
   if (command === 'stop') {
-    bot.pathfinder.setGoal(null);
-    bot._currentTask = null;
+    await coder.stop(bot);
     clearPendingResumeTask();
     bot.chat('Stopped everything.');
     return;
@@ -699,8 +978,8 @@ async function handleCommand(username, command) {
   }
 
   if (command === 'reset') {
-    conversationHistory = [];
-    autonomyHistory = [];
+    global.conversationHistory = [];
+    global.autonomyHistory = [];
     bot._currentTask = null;
     clearPendingResumeTask();
     bot.chat('Memory cleared, ready for new tasks!');
@@ -750,17 +1029,56 @@ async function handleCommand(username, command) {
 
     let parsed;
     try {
-      parsed = extractJson(raw);
+      parsed = JSON.parse(raw);
     } catch {
-      bot.chat("Hmm, I got confused. Let me try again...");
-      console.error('Failed to parse AI response:', raw);
-      isThinking = false;
-      bot.isThinking = false;
-      return;
+      try {
+        parsed = extractJson(raw);
+      } catch {
+        bot.chat("Hmm, I got confused. Let me try again...");
+        console.error('Failed to parse AI response:', raw);
+        isThinking = false;
+        bot.isThinking = false;
+        return;
+      }
+    }
+
+    // Process memory commands
+    if (parsed && Array.isArray(parsed.manage_memories)) {
+      for (const op of parsed.manage_memories) {
+        try {
+          if (op.startsWith('ADD:')) {
+            await memory.insertMemory(op.slice(4).trim());
+          } else if (op.startsWith('DELETE:')) {
+            await memory.deleteMemoryByShortId(op.slice(7).trim());
+          } else if (op.startsWith('UPDATE:')) {
+            const parts = op.slice(7).trim().split(':');
+            const shortId = parts[0].trim();
+            const newText = parts.slice(1).join(':').trim();
+            await memory.updateMemoryByShortId(shortId, newText);
+          }
+        } catch (memErr) {
+          console.error('[Memory] Operation failed:', op, memErr.message);
+        }
+      }
+    }
+
+    const { TaskNode, TaskTreeExecutor } = require('./tasks/taskTree');
+    const treeExecutor = new TaskTreeExecutor(bot);
+    let rootNode;
+
+    if (parsed.action === 'sequence' && Array.isArray(parsed.steps)) {
+      rootNode = new TaskNode('root_seq', 'NL', `Sequence of ${parsed.steps.length} tasks`);
+      parsed.steps.forEach((step, idx) => {
+        rootNode.addChild(new TaskNode(`step_${idx}`, 'ACTION', `Step ${idx + 1}: ${step.action}`, step));
+      });
+    } else {
+      rootNode = new TaskNode('root_single', 'ACTION', `Execute action: ${parsed.action}`, parsed);
     }
 
     setPendingResumeTask(command, parsed, { source: 'llm', username });
-    await executeAction(parsed);
+    await coder.execute(bot, async () => {
+      await treeExecutor.run(rootNode);
+    });
     clearPendingResumeTask();
 
   } catch (err) {
@@ -780,4 +1098,5 @@ async function handleCommand(username, command) {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
+startDashboardServer(3000);
 createBot();

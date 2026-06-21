@@ -457,6 +457,10 @@ async function startAttack(bot, target, options = {}) {
 
   stopAttack(bot, { silent: true });
 
+  if (bot.autoEat && typeof bot.autoEat.disable === 'function') {
+    bot.autoEat.disable();
+  }
+
   const best = await prepareCombatWeapon(bot);
 
   // Auto-equip shield to off-hand if we have one
@@ -615,6 +619,10 @@ async function startAttack(bot, target, options = {}) {
 }
 
 function stopAttack(bot, options = {}) {
+  if (bot.autoEat && typeof bot.autoEat.enable === 'function') {
+    bot.autoEat.enable();
+  }
+
   const state = bot._combatState;
   if (!state) return false;
 

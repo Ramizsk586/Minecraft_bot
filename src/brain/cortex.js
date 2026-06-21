@@ -794,16 +794,60 @@ function selectAction(situation) {
     });
   }
 
-  // ── 7. Normal hunger ──
-  if (food <= 14 && hasFood) {
-    actions.push({
-      name: 'eat_normal',
-      priority: PRIORITIES.eat_normal,
-      maxDuration: 5000,
-      execute: async () => {
-        await eatBrain.eat(_bot, { silent: true, force: false });
-      },
-    });
+  // ── 7. Normal hunger / Procurement ──
+  if (food <= 14) {
+    if (hasFood) {
+      if (!_bot.autoEat) {
+        actions.push({
+          name: 'eat_normal',
+          priority: PRIORITIES.eat_normal,
+          maxDuration: 5000,
+          execute: async () => {
+            await eatBrain.eat(_bot, { silent: true, force: false });
+          },
+        });
+      }
+    } else {
+      actions.push({
+        name: 'procure_food',
+        priority: PRIORITIES.eat_normal,
+        maxDuration: 40000,
+        execute: async () => {
+          log('Out of food! Attempting to craft, cook, or hunt for food.');
+          let craftResult = { success: false };
+          try {
+            craftResult = await craftBrain.craftFoodIfPossible(_bot, { silent: true });
+          } catch {}
+          if (craftResult.success) {
+            log('Auto-crafted food during procurement.');
+            await eatBrain.eat(_bot, { silent: false, force: false });
+            return;
+          }
+
+          let cookResult = { success: false };
+          try {
+            cookResult = await cookController.cookBestFood(_bot);
+          } catch {}
+          if (cookResult.success) {
+            log('Cooked raw food during procurement.');
+            await eatBrain.eat(_bot, { silent: false, force: false });
+            return;
+          }
+
+          try {
+            const huntResult = await eatBrain.huntPassiveFood(_bot, { silent: false });
+            if (huntResult.success) {
+              if (threatReport.level === 'none') {
+                try { await cookController.cookBestFood(_bot); } catch {}
+              }
+              await eatBrain.eat(_bot, { silent: false, force: false });
+            }
+          } catch (err) {
+            log(`Food procurement hunt failed: ${err.message}`);
+          }
+        },
+      });
+    }
   }
 
   // ── 8. No tools — need to gather and craft ──

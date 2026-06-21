@@ -15,9 +15,37 @@ const MATERIAL_TIERS = [
   { tier: 'diamond',   material: 'diamond',         plankBased: false, level: 5 },
   { tier: 'iron',      material: 'iron_ingot',      plankBased: false, level: 4 },
   { tier: 'stone',     material: 'cobblestone',     plankBased: false, level: 2 },
+  { tier: 'chainmail', material: null,              plankBased: false, level: 2 },
   { tier: 'golden',    material: 'gold_ingot',      plankBased: false, level: 1 },
+  { tier: 'leather',   material: 'leather',         plankBased: false, level: 1 },
   { tier: 'wooden',    material: null,               plankBased: true,  level: 1 },
 ];
+
+const ARMOR_TYPES = ['helmet', 'chestplate', 'leggings', 'boots'];
+const TOOL_TYPES = ['sword', 'axe', 'pickaxe', 'shovel', 'hoe'];
+
+function getValidTiersForItem(itemType) {
+  if (ARMOR_TYPES.includes(itemType)) {
+    return [
+      { tier: 'netherite', material: 'netherite_ingot', plankBased: false, level: 6 },
+      { tier: 'diamond',   material: 'diamond',         plankBased: false, level: 5 },
+      { tier: 'iron',      material: 'iron_ingot',      plankBased: false, level: 4 },
+      { tier: 'chainmail', material: null,              plankBased: false, level: 3 },
+      { tier: 'golden',    material: 'gold_ingot',      plankBased: false, level: 2 },
+      { tier: 'leather',   material: 'leather',         plankBased: false, level: 1 },
+    ];
+  } else if (TOOL_TYPES.includes(itemType)) {
+    return [
+      { tier: 'netherite', material: 'netherite_ingot', plankBased: false, level: 6 },
+      { tier: 'diamond',   material: 'diamond',         plankBased: false, level: 5 },
+      { tier: 'iron',      material: 'iron_ingot',      plankBased: false, level: 4 },
+      { tier: 'stone',     material: 'cobblestone',     plankBased: false, level: 2 },
+      { tier: 'golden',    material: 'gold_ingot',      plankBased: false, level: 1 },
+      { tier: 'wooden',    material: null,               plankBased: true,  level: 1 },
+    ];
+  }
+  return [];
+}
 
 const CRAFT_ALIASES = {
   wood_sword: 'wooden_sword',
@@ -168,7 +196,8 @@ function getTierInfoByName(name = '') {
 }
 
 function getOwnedTieredItem(bot, itemType) {
-  for (const t of MATERIAL_TIERS) {
+  const tiers = getValidTiersForItem(itemType);
+  for (const t of tiers) {
     if (t.tier === 'netherite') continue;
     const fullName = `${t.tier}_${itemType}`;
     const item = findItemSlot(bot, fullName);
@@ -185,8 +214,10 @@ function getEquippedArmorTier(bot, armorType) {
 }
 
 function getBestCraftableTier(bot, itemType, count = 1) {
-  for (const t of MATERIAL_TIERS) {
+  const tiers = getValidTiersForItem(itemType);
+  for (const t of tiers) {
     if (t.tier === 'netherite') continue;
+    if (t.tier === 'chainmail') continue;
     const fullName = `${t.tier}_${itemType}`;
     const steps = resolveDependencies(bot, fullName, count);
     if (steps) return { tier: t, fullName, steps };
@@ -196,7 +227,8 @@ function getBestCraftableTier(bot, itemType, count = 1) {
 
 function getBestOwnedTieredItem(bot, itemType) {
   let best = null;
-  for (const t of MATERIAL_TIERS) {
+  const tiers = getValidTiersForItem(itemType);
+  for (const t of tiers) {
     if (t.tier === 'netherite') continue;
     const fullName = `${t.tier}_${itemType}`;
     const item = findItemSlot(bot, fullName);
@@ -271,12 +303,14 @@ function stickStatus(bot) {
  * Find the best material tier the bot can use for a tiered recipe.
  * Returns { tier, material, count } or null.
  */
-function findBestTier(bot, recipe) {
+function findBestTier(bot, recipe, itemType) {
   const materialNeeded = recipe.cost._material || 0;
   if (materialNeeded === 0) return null;
 
-  for (const t of MATERIAL_TIERS) {
+  const tiers = itemType ? getValidTiersForItem(itemType) : MATERIAL_TIERS;
+  for (const t of tiers) {
     if (t.tier === 'netherite') continue; // netherite needs smithing, skip auto-craft
+    if (t.tier === 'chainmail') continue; // chainmail is not craftable
 
     if (t.plankBased) {
       // Wooden tier: uses planks as material
@@ -284,7 +318,7 @@ function findBestTier(bot, recipe) {
       if (ps.have + ps.canMake >= materialNeeded) {
         return { tier: t.tier, material: '_planks', count: ps.have + ps.canMake, level: t.level };
       }
-    } else {
+    } else if (t.material) {
       const have = countItem(bot, t.material);
       if (have >= materialNeeded) {
         return { tier: t.tier, material: t.material, count: have, level: t.level };
@@ -400,8 +434,9 @@ function resolveDependencies(bot, targetItem, count = 1) {
     if (RECIPES[item]) {
       recipe = RECIPES[item];
     } else {
-      for (const t of MATERIAL_TIERS) {
-        for (const itemType of TIERED_ITEMS) {
+      for (const itemType of TIERED_ITEMS) {
+        const tiers = getValidTiersForItem(itemType);
+        for (const t of tiers) {
           if (item === `${t.tier}_${itemType}`) {
             recipe = RECIPES[`_${itemType}`];
             tier = t;
@@ -760,8 +795,10 @@ async function craftBestTiered(bot, itemType, count = 1, options = {}) {
   }
 
   // Try to craft from best tier downward
-  for (const t of MATERIAL_TIERS) {
+  const tiers = getValidTiersForItem(itemType);
+  for (const t of tiers) {
     if (t.tier === 'netherite') continue;
+    if (t.tier === 'chainmail') continue;
     const fullName = `${t.tier}_${itemType}`;
     const steps = resolveDependencies(bot, fullName, count);
     if (steps) {
@@ -973,8 +1010,9 @@ function showMissingMaterials(bot, itemName, count = 1) {
   let tier = null;
 
   if (!recipe) {
-    for (const t of MATERIAL_TIERS) {
-      for (const type of TIERED_ITEMS) {
+    for (const type of TIERED_ITEMS) {
+      const tiers = getValidTiersForItem(type);
+      for (const t of tiers) {
         if (itemName === `${t.tier}_${type}`) {
           recipe = RECIPES[`_${type}`];
           tier = t;
@@ -1048,7 +1086,7 @@ function craftReport(bot) {
   // What can we craft
   const canCraft = [];
   for (const type of TIERED_ITEMS) {
-    const best = findBestTier(bot, RECIPES[`_${type}`]);
+    const best = findBestTier(bot, RECIPES[`_${type}`], type);
     if (best) {
       canCraft.push(`${best.tier}_${type}`);
     }

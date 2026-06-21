@@ -281,11 +281,14 @@ function checkToolForBlock(toolItem, blockName) {
   }
 
   if (SILK_TOUCH_REQUIRED_BLOCKS.has(blockName)) {
-    return {
-      canMine: true,
-      willDrop: false,
-      reason: `${blockName} needs Silk Touch to drop itself`,
-    };
+    const hasSilkTouch = toolItem?.enchants?.some(e => e.name === 'silk_touch');
+    if (!hasSilkTouch) {
+      return {
+        canMine: true,
+        willDrop: false,
+        reason: `${blockName} needs Silk Touch to drop itself`,
+      };
+    }
   }
 
   if (SHEARS_REQUIRED_BLOCKS.has(blockName) && toolItem?.name !== 'shears') {
@@ -294,6 +297,31 @@ function checkToolForBlock(toolItem, blockName) {
       willDrop: false,
       reason: `${blockName} needs shears to drop safely`,
     };
+  }
+
+  if (currentBot && currentBot.registry) {
+    const registry = currentBot.registry;
+    const blockInfo = registry.blocksByName[blockName.toLowerCase()];
+    if (blockInfo) {
+      const Block = require('prismarine-block')(currentBot.version);
+      const tempBlock = new Block(blockInfo.id, 0, 0);
+      const itemId = toolItem ? toolItem.type : null;
+      const willDrop = tempBlock.canHarvest(itemId);
+      
+      if (!willDrop) {
+        return {
+          canMine: true,
+          willDrop: false,
+          reason: `${blockName} requires a stronger tool than ${toolItem ? toolItem.name : 'hand'}`,
+        };
+      }
+
+      return {
+        canMine: true,
+        willDrop: true,
+        reason: `${toolItem ? toolItem.name : 'hand'} is sufficient`,
+      };
+    }
   }
 
   const req = getBlockRequirement(blockName);

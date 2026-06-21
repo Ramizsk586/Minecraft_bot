@@ -330,6 +330,7 @@ function register(bot, goals) {
     const initialTask = bot._currentTask;
 
     while (mined < target) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       const block = bot.findBlock({ matching: id, maxDistance: 64 });
       if (!block) {
@@ -462,6 +463,7 @@ function register(bot, goals) {
     const initialTask = bot._currentTask;
 
     for (let step = 0; step < length; step++) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       const baseX = startX + offset.x * step;
       const baseZ = startZ + offset.z * step;
@@ -514,6 +516,7 @@ function register(bot, goals) {
       // Check walls (left & right, 1 block deep) at both y levels
       for (const p of perp) {
         for (let dy = 0; dy <= 1; dy++) {
+          if (bot.interrupt_code) throw new Error('aborted');
           const wallPos = feetPos.offset(p.x, dy, p.z);
           try {
             const wallBlock = bot.blockAt(wallPos);
@@ -667,6 +670,7 @@ function register(bot, goals) {
 
     // Chop from bottom to top
     for (const logBlock of treeLogs) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       try {
         const fresh = bot.blockAt(logBlock.position);
@@ -703,6 +707,7 @@ function register(bot, goals) {
     const initialTask = bot._currentTask;
 
     for (let i = 0; i < treeCount; i++) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       const result = await chopTree({});
 

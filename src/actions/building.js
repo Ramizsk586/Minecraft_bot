@@ -396,6 +396,7 @@ async function buildFromTemplate(bot, goals, templateBlocks) {
   const initialTask = bot._currentTask;
 
   for (const b of sorted) {
+    if (bot.interrupt_code) throw new Error('aborted');
     if (bot._currentTask !== initialTask) break;
     // Check if already occupied
     const existing = bot.blockAt(new Vec3(b.x, b.y, b.z));
@@ -491,14 +492,17 @@ function register(bot, goals) {
     const initialTask = bot._currentTask;
 
     for (let dy = 0; dy < height; dy++) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       const y = baseY + dy;
 
       for (let dx = 0; dx < width; dx++) {
+        if (bot.interrupt_code) throw new Error('aborted');
         if (bot._currentTask !== initialTask) break;
         const x = startX + dx;
 
         for (let dz = 0; dz < depth; dz++) {
+          if (bot.interrupt_code) throw new Error('aborted');
           if (bot._currentTask !== initialTask) break;
           const z = startZ + dz;
 
@@ -567,10 +571,13 @@ function register(bot, goals) {
     const initialTask = bot._currentTask;
 
     for (let y = minY; y <= maxY; y++) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       for (let x = minX; x <= maxX; x++) {
+        if (bot.interrupt_code) throw new Error('aborted');
         if (bot._currentTask !== initialTask) break;
         for (let z = minZ; z <= maxZ; z++) {
+          if (bot.interrupt_code) throw new Error('aborted');
           if (bot._currentTask !== initialTask) break;
           const existingBlock = bot.blockAt(new Vec3(x, y, z));
           if (existingBlock && existingBlock.name === blockName) {
@@ -681,10 +688,13 @@ function register(bot, goals) {
 
     // Clear top-down so blocks above don't fall onto work area
     for (let y = maxY; y >= minY; y--) {
+      if (bot.interrupt_code) throw new Error('aborted');
       if (bot._currentTask !== initialTask) break;
       for (let x = minX; x <= maxX; x++) {
+        if (bot.interrupt_code) throw new Error('aborted');
         if (bot._currentTask !== initialTask) break;
         for (let z = minZ; z <= maxZ; z++) {
+          if (bot.interrupt_code) throw new Error('aborted');
           if (bot._currentTask !== initialTask) break;
           const block = bot.blockAt(new Vec3(x, y, z));
           if (!block || isAir(block.name)) {

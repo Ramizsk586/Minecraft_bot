@@ -4,11 +4,18 @@ const craftRecipes = require('./modules/irems/craft.json');
 const builds = require('./builds');
 const cook = require('./cook');
 const { resolveItemName } = require('./modules/itemNameResolver');
+const prismarineItems = require('prismarine-item');
 
 let currentBot = null;
+let ItemConstructor = null;
 
 function init(bot) {
   currentBot = bot;
+  try {
+    ItemConstructor = prismarineItems(bot.version);
+  } catch (err) {
+    console.warn(`[Data] Failed to initialize ItemConstructor for version ${bot.version}:`, err.message);
+  }
 }
 
 function normalizeKey(name) {
@@ -54,29 +61,31 @@ function getMobInfo(mobName) {
 
 function getRecipe(itemName) {
   const normalized = normalizeKey(itemName);
-  if (currentBot && currentBot.registry) {
+  if (currentBot) {
     const registry = currentBot.registry;
     const item = registry.itemsByName[normalized];
     if (item) {
-      const recipes = registry.recipes[item.id];
-      if (recipes && recipes.length > 0) {
-        const r = recipes[0];
-        const ingredientsMap = {};
-        const ingredientList = r.ingredients || (r.inShape ? r.inShape.flat() : []);
-        for (const ing of ingredientList) {
-          if (ing === null || ing === -1) continue;
-          const ingId = typeof ing === 'object' ? ing.id : ing;
-          const ingCount = typeof ing === 'object' ? (ing.count || 1) : 1;
-          const ingName = registry.items[ingId]?.name;
-          if (ingName) {
-            ingredientsMap[ingName] = (ingredientsMap[ingName] || 0) + ingCount;
+      try {
+        const recipes = currentBot.recipesAll(item.id, null, null);
+        if (recipes && recipes.length > 0) {
+          const r = recipes[0];
+          const ingredientsMap = {};
+          for (const d of r.delta || []) {
+            if (d.count < 0) {
+              const ingName = registry.items[d.id]?.name;
+              if (ingName) {
+                ingredientsMap[ingName] = (ingredientsMap[ingName] || 0) + Math.abs(d.count);
+              }
+            }
           }
+          return {
+            count: r.result.count,
+            table: r.requiresTable || false,
+            ingredients: Object.entries(ingredientsMap).map(([name, count]) => ({ item: name, count }))
+          };
         }
-        return {
-          count: r.result.count,
-          table: r.requiresTable || false,
-          ingredients: Object.entries(ingredientsMap).map(([name, count]) => ({ item: name, count }))
-        };
+      } catch (err) {
+        console.warn(`[getRecipe] Error fetching recipe for ${itemName}: ${err.message}`);
       }
     }
   }
@@ -119,6 +128,14 @@ function getSmeltableOre(name) {
   return cook.getOreCookingInfo(name);
 }
 
+function makeItem(itemName, count = 1) {
+  if (!currentBot || !ItemConstructor) return null;
+  const registry = currentBot.registry;
+  const itemInfo = registry.itemsByName[itemName.toLowerCase()];
+  if (!itemInfo) return null;
+  return new ItemConstructor(itemInfo.id, count);
+}
+
 module.exports = {
   init,
   blockDropMap,
@@ -138,4 +155,5 @@ module.exports = {
   listKnownMobs,
   listKnownRecipes,
   listKnownBuilds,
+  makeItem,
 };

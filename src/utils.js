@@ -172,23 +172,36 @@ function getSafeMiningCheck(bot, blockName, tool = null, options = {}) {
 }
 
 async function equipSafeToolForBlock(bot, blockName, options = {}) {
-  const tool = findBestTool(bot, blockName);
-  const check = getSafeMiningCheck(bot, blockName, tool, options);
-  if (!check.canMine || (options.requireDrops !== false && !check.willDrop)) {
-    return { tool: null, check };
+  let tempBlock = null;
+  const registry = bot.registry;
+  const blockInfo = registry.blocksByName[blockName.toLowerCase()];
+  if (blockInfo) {
+    const Block = require('prismarine-block')(bot.version);
+    tempBlock = new Block(blockInfo.id, 0, 0);
   }
 
-  if (tool) {
+  if (tempBlock && bot.tool && typeof bot.tool.equipForBlock === 'function') {
     try {
-      await bot.equip(tool, 'hand');
+      await bot.tool.equipForBlock(tempBlock);
     } catch (err) {
-      return {
-        tool: null,
-        check: { canMine: false, willDrop: false, reason: `failed to equip ${tool.name}: ${err.message}` },
-      };
+      console.warn(`[ToolEquip] Failed to auto-equip for ${blockName}:`, err.message);
+    }
+  } else {
+    const tool = findBestTool(bot, blockName);
+    if (tool) {
+      try {
+        await bot.equip(tool, 'hand');
+      } catch (err) {
+        return {
+          tool: null,
+          check: { canMine: false, willDrop: false, reason: `failed to equip ${tool.name}: ${err.message}` },
+        };
+      }
     }
   }
 
+  const tool = bot.heldItem || null;
+  const check = getSafeMiningCheck(bot, blockName, tool, options);
   return { tool, check };
 }
 
