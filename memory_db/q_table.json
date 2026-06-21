@@ -1,0 +1,20 @@
+{
+  "low:starving:attacked:night:enough:low": {
+    "idle": 10,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:full:none:day:enough:enough": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  }
+}

@@ -68,7 +68,7 @@
 
         /* Sidebar styling */
         .sidebar {
-            width: 220px;
+            width: 196px;
             background: var(--bg-sidebar);
             border-right: 1px solid var(--border);
             display: flex;
@@ -81,17 +81,8 @@
         .sidebar-brand {
             display: flex;
             align-items: center;
-            gap: 10px;
             margin-bottom: 24px;
             padding-left: 6px;
-        }
-
-        .logo-mark {
-            width: 10px;
-            height: 10px;
-            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
-            transform: rotate(45deg);
-            box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
         }
 
         .sidebar-brand h2 {
@@ -164,16 +155,20 @@
             padding-top: 12px;
             display: flex;
             align-items: center;
-            justify-content: space-between;
         }
 
         .connection-status {
             display: flex;
             align-items: center;
             gap: 8px;
-            font-size: 0.76rem;
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            font-size: 0.82rem;
             font-weight: 500;
             color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.02);
         }
 
         .status-dot {
@@ -181,6 +176,11 @@
             height: 6px;
             border-radius: 50%;
             background: var(--accent-red);
+        }
+
+        .status-dot.offline {
+            background: var(--accent-red);
+            box-shadow: 0 0 6px rgba(239, 68, 68, 0.25);
         }
 
         .status-dot.online {
@@ -258,6 +258,8 @@
             color: var(--text-secondary);
             margin-bottom: 12px;
         }
+
+
 
         /* Stats bars */
         .stat-row {
@@ -397,6 +399,11 @@
 
         .btn:hover { opacity: 0.9; }
         .btn.stop { background: var(--accent-red); }
+        .btn.secondary { background: var(--accent-blue); }
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
 
         /* Inventory Grid */
         .inventory-grid {
@@ -507,6 +514,10 @@
             .settings-grid { grid-template-columns: 1fr; }
         }
 
+        .settings-grid .card.full-span {
+            grid-column: 1 / -1;
+        }
+
         .form-group {
             display: flex;
             flex-direction: column;
@@ -538,6 +549,72 @@
             resize: vertical;
             min-height: 140px;
         }
+
+        .settings-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 8px;
+        }
+
+        .settings-note {
+            font-size: 0.74rem;
+            color: var(--text-secondary);
+            line-height: 1.45;
+            margin-top: 6px;
+        }
+
+        .upload-dropzone {
+            background: var(--bg-input);
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 24px 16px;
+            text-align: center;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            transition: border-color 0.2s, background-color 0.2s;
+            margin-top: 6px;
+        }
+
+        .upload-dropzone:hover, .upload-dropzone.dragover {
+            border-color: var(--accent);
+            background: rgba(147, 51, 234, 0.05);
+        }
+
+        .upload-icon {
+            color: var(--text-secondary);
+            transition: color 0.2s;
+        }
+
+        .upload-dropzone:hover .upload-icon, .upload-dropzone.dragover .upload-icon {
+            color: var(--accent);
+        }
+
+        .upload-text {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .upload-browse {
+            color: var(--accent);
+            text-decoration: underline;
+            font-weight: 500;
+        }
+
+        .upload-filename {
+            font-size: 0.72rem;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            background: rgba(255, 255, 255, 0.04);
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            margin-top: 4px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -547,7 +624,6 @@
         <aside class="sidebar">
             <div class="sidebar-container">
                 <div class="sidebar-brand">
-                    <div class="logo-mark"></div>
                     <h2>Bot Manager</h2>
                 </div>
                 
@@ -589,6 +665,16 @@
                             </svg>
                         </span>
                         Crafting & Builds
+                    </button>
+                    <button class="nav-item" data-tab="upload">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                        </span>
+                        Upload
                     </button>
                     <button class="nav-item" data-tab="settings">
                         <span class="nav-icon">
@@ -657,9 +743,12 @@
                 <div class="card">
                     <span class="card-header">Quick Action Panel</span>
                     <div style="display: flex; gap: 12px; max-width: 400px;">
+                        <button id="start-btn" class="btn secondary">Start Bot</button>
                         <button id="stop-btn" class="btn stop">Halt Pathfinder & Stop Task</button>
                     </div>
                 </div>
+
+
             </section>
 
             <!-- 2. Terminal Tab -->
@@ -745,7 +834,41 @@
                 </div>
             </section>
 
-            <!-- 5. Settings Tab -->
+            <!-- 5. Upload Tab -->
+            <section id="tab-upload" class="tab-pane">
+                <h1 class="page-title">Upload Custom Structures</h1>
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <span class="card-header">Upload New Structure</span>
+                        <div class="form-group">
+                            <label class="form-label">Select JSON Template File</label>
+                            <div class="upload-dropzone" id="upload-dropzone">
+                                <svg class="upload-icon" viewBox="0 0 24 24" width="32" height="32">
+                                    <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                                </svg>
+                                <span class="upload-text">Drag & drop your JSON file here, or <span class="upload-browse">browse</span></span>
+                                <span class="upload-filename" id="upload-filename">No file selected</span>
+                            </div>
+                            <input type="file" id="structure-file-input" style="display: none;" accept=".json" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="structure-name-input">Structure Name (for AI to identify)</label>
+                            <input type="text" id="structure-name-input" class="form-control" placeholder="e.g. brick_castle" />
+                        </div>
+                        <button class="btn" id="btn-upload-structure" style="margin-top: 8px;">Upload Structure</button>
+                        <div id="upload-status" style="margin-top: 10px; font-size: 0.8rem; font-weight: 500; min-height: 20px;"></div>
+                    </div>
+                    
+                    <div class="card">
+                        <span class="card-header">Available Custom Templates</span>
+                        <div id="templates-list-container" style="overflow-y: auto; max-height: 280px; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                            <div class="empty-inv" style="padding: 20px 0;">No custom structures uploaded yet.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6. Settings Tab -->
             <section id="tab-settings" class="tab-pane">
                 <h1 class="page-title">Configuration & Persona</h1>
                 <div class="settings-grid">
@@ -753,23 +876,47 @@
                         <span class="card-header">Server Details</span>
                         <div class="form-group">
                             <label class="form-label">Minecraft Server Host</label>
-                            <input type="text" class="form-control" id="settings-host" readonly value="localhost" />
+                            <input type="text" class="form-control" id="settings-host" value="localhost" />
                         </div>
                         <div class="form-group">
                             <label class="form-label">Port</label>
-                            <input type="text" class="form-control" id="settings-port" readonly value="25565" />
+                            <input type="text" class="form-control" id="settings-port" value="25565" />
                         </div>
                         <div class="form-group">
                             <label class="form-label">Owner Username</label>
-                            <input type="text" class="form-control" id="settings-owner" readonly value="N/A" />
+                            <input type="text" class="form-control" id="settings-owner" value="N/A" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Bot Username</label>
+                            <input type="text" class="form-control" id="settings-username" value="AIBot" />
                         </div>
                     </div>
 
                     <div class="card">
-                        <span class="card-header">AI Persona prompt</span>
+                        <span class="card-header">LLM Settings</span>
                         <div class="form-group">
-                            <label class="form-label">Current Persona System prompt (Editable via .env)</label>
-                            <textarea class="form-control persona-prompt" id="settings-persona" readonly>Loading persona...</textarea>
+                            <label class="form-label">Provider</label>
+                            <input type="text" class="form-control" id="settings-provider" value="openrouter" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Model</label>
+                            <input type="text" class="form-control" id="settings-model" value="" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">API Key</label>
+                            <input type="password" class="form-control" id="settings-api-key" value="" />
+                        </div>
+                        <div class="settings-actions">
+                            <button id="save-settings-btn" class="btn">Save Settings</button>
+                        </div>
+                        <div class="settings-note">Saved to `.env`. Restart the bot process after changing provider or model settings.</div>
+                    </div>
+
+                    <div class="card full-span">
+                        <span class="card-header">Persona</span>
+                        <div class="form-group">
+                            <label class="form-label">Current Persona System Prompt</label>
+                            <textarea class="form-control persona-prompt" id="settings-persona">Loading persona...</textarea>
                         </div>
                     </div>
                 </div>
@@ -803,13 +950,13 @@
         const botNameTitle = document.getElementById('bot-name-title');
 
         socket.on('connect', () => {
-            statusIndicator.className = 'status-dot online';
-            statusText.innerText = 'Online';
+            statusIndicator.className = 'status-dot offline';
+            statusText.innerText = 'Offline';
         });
 
         socket.on('disconnect', () => {
-            statusIndicator.className = 'status-dot';
-            statusText.innerText = 'Disconnected';
+            statusIndicator.className = 'status-dot offline';
+            statusText.innerText = 'Offline';
         });
 
         // State update
@@ -821,11 +968,17 @@
         const taskValue = document.getElementById('task-value');
         const inventoryContainer = document.getElementById('inventory-container');
         
+        
         // Settings panel
         const settingsHost = document.getElementById('settings-host');
         const settingsPort = document.getElementById('settings-port');
         const settingsOwner = document.getElementById('settings-owner');
+        const settingsUsername = document.getElementById('settings-username');
+        const settingsProvider = document.getElementById('settings-provider');
+        const settingsModel = document.getElementById('settings-model');
+        const settingsApiKey = document.getElementById('settings-api-key');
         const settingsPersona = document.getElementById('settings-persona');
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
 
         socket.on('state', (state) => {
             if (!state || Object.keys(state).length === 0) return;
@@ -848,11 +1001,24 @@
             // Task
             taskValue.innerText = state.currentTask;
 
+            if (typeof state.canStartBot === 'boolean') {
+                startBtn.disabled = !state.canStartBot;
+            }
+
+            const isBotOnline = state.botConnectionState === 'online';
+            statusIndicator.className = `status-dot ${isBotOnline ? 'online' : 'offline'}`;
+            statusText.innerText = isBotOnline ? 'Online' : 'Offline';
+
+
             // Settings values
-            if (state.host) settingsHost.value = state.host;
-            if (state.port) settingsPort.value = state.port;
-            if (state.owner) settingsOwner.value = state.owner;
-            if (state.persona) settingsPersona.value = state.persona;
+            if (state.host && document.activeElement !== settingsHost) settingsHost.value = state.host;
+            if (state.port && document.activeElement !== settingsPort) settingsPort.value = state.port;
+            if (state.owner && document.activeElement !== settingsOwner) settingsOwner.value = state.owner;
+            if (state.username && document.activeElement !== settingsUsername) settingsUsername.value = state.username;
+            if (typeof state.provider === 'string' && document.activeElement !== settingsProvider) settingsProvider.value = state.provider;
+            if (typeof state.model === 'string' && document.activeElement !== settingsModel) settingsModel.value = state.model;
+            if (typeof state.apiKey === 'string' && document.activeElement !== settingsApiKey) settingsApiKey.value = state.apiKey;
+            if (state.persona && document.activeElement !== settingsPersona) settingsPersona.value = state.persona;
 
             // Inventory Rendering
             if (state.inventory && state.inventory.length > 0) {
@@ -882,6 +1048,7 @@
         // Terminal text inputs
         const commandInput = document.getElementById('command-input');
         const sendCmdBtn = document.getElementById('send-cmd-btn');
+        const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const terminalLogs = document.getElementById('terminal-logs');
 
@@ -898,6 +1065,23 @@
         });
 
         sendCmdBtn.addEventListener('click', processCommandSend);
+
+        startBtn.addEventListener('click', () => {
+            socket.emit('start-bot');
+        });
+
+        saveSettingsBtn.addEventListener('click', () => {
+            socket.emit('save-settings', {
+                host: settingsHost.value.trim(),
+                port: settingsPort.value.trim(),
+                owner: settingsOwner.value.trim(),
+                username: settingsUsername.value.trim(),
+                provider: settingsProvider.value.trim(),
+                model: settingsModel.value.trim(),
+                apiKey: settingsApiKey.value.trim(),
+                persona: settingsPersona.value
+            });
+        });
 
         stopBtn.addEventListener('click', () => {
             socket.emit('stop');
@@ -936,6 +1120,155 @@
             terminalLogs.innerHTML = '';
             logs.forEach(log => appendLog(log));
         });
+
+        // Upload Tab Scripting
+        const btnUploadStructure = document.getElementById('btn-upload-structure');
+        const structureFileInput = document.getElementById('structure-file-input');
+        const structureNameInput = document.getElementById('structure-name-input');
+        const uploadStatus = document.getElementById('upload-status');
+        const templatesListContainer = document.getElementById('templates-list-container');
+        const uploadDropzone = document.getElementById('upload-dropzone');
+        const uploadFilename = document.getElementById('upload-filename');
+
+        // Click on dropzone triggers file input
+        uploadDropzone.addEventListener('click', () => {
+            structureFileInput.click();
+        });
+
+        // Drag & drop handlers
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadDropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                uploadDropzone.classList.add('dragover');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadDropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                uploadDropzone.classList.remove('dragover');
+            }, false);
+        });
+
+        uploadDropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files && files.length > 0) {
+                structureFileInput.files = files;
+                const event = new Event('change', { bubbles: true });
+                structureFileInput.dispatchEvent(event);
+            }
+        }, false);
+
+        // Auto-fill structure name and update dropzone display when file is selected
+        structureFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
+                structureNameInput.value = nameWithoutExt;
+                uploadFilename.innerText = `Selected: ${file.name}`;
+                uploadFilename.style.display = 'block';
+            } else {
+                uploadFilename.innerText = 'No file selected';
+                uploadFilename.style.display = 'none';
+            }
+        });
+
+        // Function to fetch and render templates list
+        async function fetchTemplates() {
+            try {
+                const res = await fetch('/api/structures');
+                const templates = await res.json();
+                
+                if (templates && templates.length > 0) {
+                    templatesListContainer.innerHTML = templates.map(t => `
+                        <div class="inventory-card" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; min-height: 50px; padding: 10px 12px; margin-bottom: 0;">
+                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                <span class="inv-name" style="margin-top: 0; font-size: 0.82rem;">${t.name}</span>
+                                <span class="inv-slot" style="font-size: 0.68rem;">Blocks: ${t.blockCount}</span>
+                            </div>
+                            <div style="display: flex; gap: 6px;">
+                                <button class="btn" style="padding: 4px 10px; font-size: 0.72rem;" onclick="triggerCommand('!build ${t.name}')">Build</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    templatesListContainer.innerHTML = '<div class="empty-inv" style="padding: 20px 0;">No custom structures uploaded yet.</div>';
+                }
+            } catch (err) {
+                console.error('Failed to fetch templates:', err);
+                templatesListContainer.innerHTML = '<div class="empty-inv" style="padding: 20px 0; color: var(--accent-red);">Error loading templates.</div>';
+            }
+        }
+
+        btnUploadStructure.addEventListener('click', async () => {
+            const file = structureFileInput.files[0];
+            const name = structureNameInput.value.trim();
+
+            if (!file) {
+                uploadStatus.style.color = 'var(--accent-red)';
+                uploadStatus.innerText = 'Please select a JSON template file.';
+                return;
+            }
+            if (!name) {
+                uploadStatus.style.color = 'var(--accent-red)';
+                uploadStatus.innerText = 'Please enter a name for the structure.';
+                return;
+            }
+
+            uploadStatus.style.color = 'var(--text-secondary)';
+            uploadStatus.innerText = 'Reading file...';
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const content = JSON.parse(e.target.result);
+                    if (!Array.isArray(content)) {
+                        throw new Error('Template must be a JSON array of blocks.');
+                    }
+                    
+                    // Basic validation
+                    for (let i = 0; i < content.length; i++) {
+                        const b = content[i];
+                        if (typeof b.x !== 'number' || typeof b.y !== 'number' || typeof b.z !== 'number' || typeof b.block !== 'string') {
+                            throw new Error(`Block at index ${i} is missing x, y, z coordinates or block type name.`);
+                        }
+                    }
+
+                    uploadStatus.innerText = 'Uploading to server...';
+
+                    const response = await fetch('/api/upload-structure', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ name, blocks: content })
+                    });
+
+                    const result = await response.json();
+                    if (response.ok) {
+                        uploadStatus.style.color = 'var(--accent-green)';
+                        uploadStatus.innerText = `Successfully uploaded structure "${name}"!`;
+                        structureFileInput.value = '';
+                        structureNameInput.value = '';
+                        uploadFilename.style.display = 'none';
+                        uploadFilename.innerText = '';
+                        fetchTemplates();
+                    } else {
+                        throw new Error(result.error || 'Server error uploading structure.');
+                    }
+                } catch (err) {
+                    uploadStatus.style.color = 'var(--accent-red)';
+                    uploadStatus.innerText = `Error: ${err.message}`;
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // Initial fetch
+        fetchTemplates();
     </script>
 </body>
 </html>

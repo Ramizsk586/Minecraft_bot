@@ -243,6 +243,34 @@ function register(bot, goals) {
       bot.chat(`Collected ${collected} items.`);
     },
 
+    find_block: async (action) => {
+      const blockName = action.block;
+      if (!blockName) {
+        bot.chat('find_block: Please specify a block name.');
+        return;
+      }
+      
+      const blockType = bot.registry.blocksByName[blockName];
+      if (!blockType) {
+        bot.chat(`find_block: Block "${blockName}" is not known.`);
+        return;
+      }
+
+      const found = bot.findBlocks({
+        matching: blockType.id,
+        maxDistance: 48,
+        count: 5,
+      });
+
+      if (found.length > 0) {
+        const nearest = found[0];
+        bot.chat(`Found ${found.length}x ${blockName} nearby. Nearest is at: ${nearest.x}, ${nearest.y}, ${nearest.z}.`);
+        console.log(`[find_block] Found ${blockName} at ${nearest.x},${nearest.y},${nearest.z}`);
+      } else {
+        bot.chat(`I couldn't find any ${blockName} in a 48 block radius.`);
+      }
+    },
+
     sequence: async (action) => {
       if (!executeAction) {
         bot.chat('Sequence executor not initialized.');

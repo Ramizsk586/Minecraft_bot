@@ -315,14 +315,14 @@ function register(bot, goals) {
 
     if (id == null) {
       bot.chat(`I don't know what "${blockName}" is.`);
-      return;
+      return { success: false, error: `unknown_block:${blockName}` };
     }
 
     // ── Pre-flight: check tool requirements and upgrades ──
     const currentTool = await ensureMiningTool(bot, blockName);
     if (miningRules.getBlockRequirement(blockName) && !currentTool) {
       bot.chat(`❌ Cannot mine ${blockName} for drops. Skipping.`);
-      return;
+      return { success: false, error: `missing_tool_for:${blockName}`, mined: 0 };
     }
 
     bot.chat(`Mining ${target} ${blockName}...`);
@@ -345,7 +345,7 @@ function register(bot, goals) {
       const activeTool = await ensureMiningTool(bot, blockName);
       if (miningRules.getBlockRequirement(blockName) && !activeTool) {
         bot.chat(`❌ Tool broke or insufficient to get drops from ${blockName}. Stopping.`);
-        break;
+        return { success: mined > 0, error: `tool_unavailable_mid_mine:${blockName}`, mined };
       }
 
       const dug = await holdDigBlock(bot, goals, block);
@@ -371,8 +371,10 @@ function register(bot, goals) {
 
     if (mined > 0) {
       bot.chat(`Done! Mined ${mined} ${blockName}.`);
+      return { success: true, mined };
     } else {
       bot.chat(`Couldn't mine ${blockName} right now.`);
+      return { success: false, error: `unable_to_mine_now:${blockName}`, mined };
     }
   }
 

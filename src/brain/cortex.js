@@ -71,6 +71,8 @@ const ACTION_COOLDOWNS = {
 
 const ACTION_FAILURE_BACKOFF_MS = 15000;
 const MAX_ACTION_FAILURES = 3;
+const AUTONOMY_BLOCK_THRESHOLD = 2;
+const AUTONOMY_BLOCK_REROUTE_COOLDOWN_MS = 30000;
 
 // Dynamic tick intervals based on survival score
 const TICK_SPEEDS = [
@@ -130,6 +132,7 @@ const _state = {
   lastFurnaceCheck: 0,
   deathRecovery:    null,
   surviveActive:    false,  // whether autonomous mode is engaged
+  autonomyBlocks:   {},
 };
 
 const DEATH_RECOVERY_MAX_DISTANCE = 96;
@@ -456,6 +459,51 @@ function markActionFinished(action, failed = false) {
   } else {
     delete _state.actionFailures[action.name];
   }
+}
+
+function clearAutonomyBlock(key) {
+  if (!key) return;
+  delete _state.autonomyBlocks[key];
+}
+
+function noteAutonomyBlock(key, detail = {}) {
+  const now = Date.now();
+  const previous = _state.autonomyBlocks[key] || { count: 0, lastAt: 0, rerouteAt: 0 };
+  const count = now - previous.lastAt < 120000 ? previous.count + 1 : 1;
+  _state.autonomyBlocks[key] = {
+    count,
+    lastAt: now,
+    rerouteAt: previous.rerouteAt || 0,
+    detail,
+  };
+  return _state.autonomyBlocks[key];
+}
+
+async function maybeRerouteAutonomyFromBlock(key, detail = {}) {
+  if (!_bot?.runAIAutonomy || !_bot?.aiAutonomy?.enabled) return false;
+  const blockState = noteAutonomyBlock(key, detail);
+  if (blockState.count < AUTONOMY_BLOCK_THRESHOLD) return false;
+  if (Date.now() - (blockState.rerouteAt || 0) < AUTONOMY_BLOCK_REROUTE_COOLDOWN_MS) return false;
+
+  blockState.rerouteAt = Date.now();
+  announce('ai_reroute', 'I am stuck on this step. Asking the AI supervisor for a different plan.', 20000);
+  const result = await _bot.runAIAutonomy({
+    force: true,
+    trigger: 'blocked_autonomy_loop',
+    blockedAction: key,
+    blockedDetail: detail,
+    survivalScore: _state.lastSurvivalScore,
+    lastAction: _state.lastAction,
+    persistentGoal: _state.persistentGoal,
+  });
+
+  if (!result.success) {
+    log(`AI reroute skipped: ${result.reason || 'unknown reason'}`);
+    return false;
+  }
+
+  clearAutonomyBlock(key);
+  return true;
 }
 
 function chooseBestAction(actions) {
@@ -1205,7 +1253,20 @@ async function handleNightSafety() {
   const fallbackCount = craftBrain.countItem(_bot, fallbackBlock);
   if (fallbackCount < 15) {
     _bot.chat(`Mining some ${fallbackBlock} for emergency shelter...`);
-    await skills.mineBlock(_bot, fallbackBlock, 15);
+    const result = await skills.mineBlock(_bot, fallbackBlock, 15);
+    if (!result?.success) {
+      const rerouted = await maybeRerouteAutonomyFromBlock('night_shelter_materials', {
+        block: fallbackBlock,
+        needed: 15,
+        reason: result?.error || 'shelter_material_unavailable',
+        mode: 'night_safety',
+      });
+      if (!rerouted) {
+        throw new Error(`Shelter material mining failed: ${result?.error || fallbackBlock}`);
+      }
+    } else {
+      clearAutonomyBlock('night_shelter_materials');
+    }
   }
 }
 
@@ -1274,7 +1335,20 @@ async function handleToolProgression() {
   const pickaxe = _bot.inventory.items().find(i => i.name === 'wooden_pickaxe');
   if (pickaxe && cobble < 12) {
     announce('tools', `Mining ${coreBlock} to upgrade tools...`, 20000);
-    await skills.mineBlock(_bot, coreBlock, 8);
+    const result = await skills.mineBlock(_bot, coreBlock, 8);
+    if (!result?.success) {
+      const rerouted = await maybeRerouteAutonomyFromBlock('tool_progression_mining', {
+        block: coreBlock,
+        needed: 8,
+        reason: result?.error || 'tool_progression_blocked',
+        mode: 'tool_progression',
+      });
+      if (!rerouted) {
+        throw new Error(`Tool progression mining failed: ${result?.error || coreBlock}`);
+      }
+    } else {
+      clearAutonomyBlock('tool_progression_mining');
+    }
     return;
   }
 
@@ -1625,6 +1699,7 @@ function start(bot, options = {}) {
   _state.announcements = {};
   _state.actionCooldowns = {};
   _state.actionFailures = {};
+  _state.autonomyBlocks = {};
 
   // Death snapshot listener
   _state._onDeath = () => {
@@ -1688,6 +1763,7 @@ function getStatus() {
     persistentGoal: _state.persistentGoal,
     cooldowns: { ..._state.actionCooldowns },
     failures: { ..._state.actionFailures },
+    autonomyBlocks: { ..._state.autonomyBlocks },
     aiAutonomy: _bot?.aiAutonomy ? { ..._bot.aiAutonomy } : null,
     biome: biomePlan ? {
       name: biomePlan.name,

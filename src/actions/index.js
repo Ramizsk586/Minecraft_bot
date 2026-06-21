@@ -61,7 +61,7 @@ function createExecutor(bot) {
   async function executeAction(action) {
     if (!action || typeof action !== 'object' || !action.action) {
       bot.chat('Invalid action plan.');
-      return;
+      return { success: false, error: 'invalid_action_plan' };
     }
 
     console.log('🤖 Executing:', JSON.stringify(action));
@@ -69,13 +69,19 @@ function createExecutor(bot) {
     const handler = allHandlers[action.action];
     if (handler) {
       try {
-        await handler(action);
+        const result = await handler(action);
+        if (result && typeof result === 'object') {
+          return result;
+        }
+        return { success: true };
       } catch (err) {
         console.error(`Action "${action.action}" failed:`, err);
         bot.chat(`Action failed: ${err.message}`);
+        return { success: false, error: err.message };
       }
     } else {
       bot.chat(`Unknown action: ${action.action}`);
+      return { success: false, error: `unknown_action:${action.action}` };
     }
   }
 

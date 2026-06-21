@@ -17,7 +17,12 @@ const libraryData = require('./library/data');
 const libraryCalc = require('./library/modules/calc');
 const { resolveItemName } = require('./library/modules/itemNameResolver');
 const miningRules = require('./brain/miningRules');
-const { startDashboardServer, updateBotInstance } = require('./dashboard/server');
+const {
+  startDashboardServer,
+  updateBotInstance,
+  setDashboardStatus,
+  registerDashboardControls
+} = require('./dashboard/server');
 const memory = require('./brain/memory');
 const recovery = require('./tasks/recovery');
 const modes = require('./brain/modes');
@@ -39,11 +44,12 @@ function buildLlmConfig() {
       : 'https://openrouter.ai/api/v1'),
     llmApiKey: envValue('MODEL_KEY') || envValue('LLM_API_KEY') || envValue('OPENROUTER_API_KEY'),
     llmModel: envValue('LLM_MODEL') || (provider === 'ollama' ? 'llama3' : 'openai/gpt-4o-mini'),
-  llmReferer: envValue('OPENROUTER_SITE_URL'),
-  llmTitle: envValue('OPENROUTER_APP_NAME', 'Minecraft AI Bot'),
-  aiAutonomyEnabled: envValue('AI_AUTONOMY', 'true').toLowerCase() !== 'false',
-  aiAutonomyIntervalMs: parseInt(envValue('AI_AUTONOMY_INTERVAL_MS', '45000'), 10) || 45000,
-};
+    llmReferer: envValue('OPENROUTER_SITE_URL'),
+    llmTitle: envValue('OPENROUTER_APP_NAME', 'Minecraft AI Bot'),
+    aiAutonomyEnabled: envValue('AI_AUTONOMY', 'true').toLowerCase() !== 'false',
+    aiAutonomyIntervalMs: parseInt(envValue('AI_AUTONOMY_INTERVAL_MS', '45000'), 10) || 45000,
+    aiAutonomyMode: envValue('AI_AUTONOMY_MODE', 'llm').toLowerCase(),
+  };
 }
 
 // ????????? Config ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
@@ -62,6 +68,9 @@ const config = {
   llmModel: llmConfig.llmModel,
   llmReferer: llmConfig.llmReferer,
   llmTitle: llmConfig.llmTitle,
+  aiAutonomyEnabled: llmConfig.aiAutonomyEnabled,
+  aiAutonomyIntervalMs: llmConfig.aiAutonomyIntervalMs,
+  aiAutonomyMode: llmConfig.aiAutonomyMode,
 };
 
 const MAX_AI_EMPTY_RETRIES = 2;
@@ -77,10 +86,21 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let reconnectDelayOverrideMs = null;
 let pendingResumeTask = null;
+let botStartRequested = false;
+let botConnecting = false;
 const aiAutonomyState = {
   enabled: config.aiAutonomyEnabled,
+  mode: config.aiAutonomyMode || 'llm',
   lastPlanAt: 0,
   lastErrorAt: 0,
+  rlStats: {
+    totalSteps: 0,
+    totalReward: 0,
+    lastReward: 0,
+    epsilon: 0.15,
+    lastAction: null,
+    lastState: null
+  }
 };
 
 function shouldPersistActionPlan(action) {
@@ -159,7 +179,36 @@ function clearReconnectTimer() {
   }
 }
 
+
+function refreshDashboardStatus(overrides = {}) {
+  const hasBot = !!bot;
+  const username = hasBot ? (bot.username || config.username) : config.username;
+  setDashboardStatus({
+    username,
+    host: config.host,
+    port: config.port,
+    owner: config.owner || 'N/A',
+    persona: process.env.PERSONA || 'No custom persona set.',
+    provider: process.env.PROVIDER || 'openrouter',
+    model: process.env.LLM_MODEL || '',
+    apiKey: process.env.MODEL_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || '',
+    botConnectionState: botConnecting ? 'connecting' : (hasBot ? 'online' : (botStartRequested ? 'stopped' : 'idle')),
+    canStartBot: !botConnecting && !hasBot,
+    ...overrides,
+  });
+}
+
 function scheduleReconnect(reason = 'disconnect', delayMs = 5000) {
+  if (!botStartRequested) {
+    console.log(`Reconnect skipped (${reason}) because the bot has not been started from the dashboard.`);
+    refreshDashboardStatus({
+      currentTask: 'Waiting for you to start the bot.',
+      botConnectionState: 'idle',
+      canStartBot: true
+    });
+    return;
+  }
+
   if (reconnectTimer) {
     console.log(`Reconnect already scheduled, skipping duplicate request (${reason}).`);
     return;
@@ -170,6 +219,11 @@ function scheduleReconnect(reason = 'disconnect', delayMs = 5000) {
   reconnectDelayOverrideMs = null;
 
   console.log(`Disconnected (${reason}). Reconnecting in ${Math.round(finalDelay / 1000)}s...`);
+  refreshDashboardStatus({
+    currentTask: `Disconnected (${reason}). Retrying in ${Math.round(finalDelay / 1000)}s...`,
+    botConnectionState: 'stopped',
+    canStartBot: false
+  });
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     createBot();
@@ -179,7 +233,17 @@ function scheduleReconnect(reason = 'disconnect', delayMs = 5000) {
 // ─── Create Bot ───────────────────────────────────────────────────────────────
 
 function createBot() {
+  if (botConnecting) {
+    return;
+  }
+
   clearReconnectTimer();
+  botConnecting = true;
+  refreshDashboardStatus({
+    currentTask: `Connecting to Minecraft server at ${config.host}:${config.port}...`,
+    botConnectionState: 'connecting',
+    canStartBot: false
+  });
   bot = mineflayer.createBot({
     host: config.host,
     port: config.port,
@@ -230,6 +294,13 @@ function createBot() {
   bot.once('spawn', () => {
     console.log(`✅ ${config.username} spawned in the world`);
     reconnectAttempt = 0;
+    botConnecting = false;
+    refreshDashboardStatus({
+      username: bot.username || config.username,
+      currentTask: 'Idle',
+      botConnectionState: 'online',
+      canStartBot: false
+    });
 
     if (bot.autoEat) {
       bot.autoEat.options = {
@@ -365,17 +436,95 @@ function createBot() {
       console.log('Duplicate login detected. Waiting longer before reconnecting.');
     }
   });
-  bot.on('error', (err) => console.error('Bot error:', err));
+  bot.on('error', (err) => {
+    const message = String(err?.message || err);
+    console.error('Bot error:', err);
+
+    if (message.includes('ECONNREFUSED')) {
+      botConnecting = false;
+      bot = null;
+      updateBotInstance(null);
+      refreshDashboardStatus({
+        username: config.username,
+        currentTask: `Minecraft server not reachable at ${config.host}:${config.port}.`,
+        botConnectionState: 'stopped',
+        canStartBot: true
+      });
+    }
+  });
 
   bot.on('end', () => {
-    const interruptedTask = bot._currentTask;
+    const interruptedTask = bot?._currentTask;
     if (!pendingResumeTask && interruptedTask && !String(interruptedTask).startsWith('cortex:') && !String(interruptedTask).startsWith('autonomy:')) {
       pendingResumeTask = null;
     }
-    bot._currentTask = null;
+    botConnecting = false;
+    bot = null;
+    updateBotInstance(null);
     brain.shutdown();
     scheduleReconnect('end', 5000);
   });
+}
+
+async function startBotFromDashboard() {
+  if (botConnecting) {
+    return { started: false, reason: 'Bot connection is already in progress.' };
+  }
+
+  if (bot) {
+    return { started: false, reason: 'Bot is already running.' };
+  }
+
+  botStartRequested = true;
+  createBot();
+  return { started: true };
+}
+
+async function saveSettingsFromDashboard(payload = {}, helpers = {}) {
+  const nextHost = String(payload.host || '').trim() || 'localhost';
+  const nextPort = String(payload.port || '').trim() || '25565';
+  const nextOwner = String(payload.owner || '').trim();
+  const nextUsername = String(payload.username || '').trim() || 'AIBot';
+  const updates = {
+    MC_HOST: nextHost,
+    MC_PORT: nextPort,
+    MC_USERNAME: nextUsername,
+    OWNER_USERNAME: nextOwner,
+    PROVIDER: String(payload.provider || '').trim() || 'openrouter',
+    LLM_MODEL: String(payload.model || '').trim(),
+    MODEL_KEY: String(payload.apiKey || '').trim(),
+    PERSONA: String(payload.persona || '').trim(),
+  };
+
+  if (typeof helpers.updateEnvFile === 'function') {
+    helpers.updateEnvFile(updates);
+  }
+
+  Object.entries(updates).forEach(([key, value]) => {
+    process.env[key] = value;
+  });
+
+  // Update in-memory config object
+  config.host = nextHost;
+  config.port = parseInt(nextPort, 10) || 25565;
+  config.owner = nextOwner;
+  config.username = nextUsername;
+
+  refreshDashboardStatus({
+    username: nextUsername,
+    host: nextHost,
+    port: parseInt(nextPort, 10) || 25565,
+    owner: nextOwner || 'N/A',
+    provider: updates.PROVIDER,
+    model: updates.LLM_MODEL,
+    apiKey: updates.MODEL_KEY,
+    persona: updates.PERSONA || 'No custom persona set.'
+  });
+
+  return {
+    saved: true,
+    message: 'Settings saved to .env. Restart the bot process to fully apply provider changes.'
+  };
 }
 
 
@@ -403,6 +552,7 @@ Available actions:
 - {"action": "equip", "item": "item_name"}
 - {"action": "eat", "item": "food_item"}
 - {"action": "collect"}
+- {"action": "find_block", "block": "block_name"}
 
 === BUILDING ===
 - {"action": "place", "block": "block_name", "x": number, "y": number, "z": number}
@@ -537,7 +687,7 @@ const responseSchema = {
           "mine", "strip_mine", "chop_tree", "gather_wood",
           "deposit", "deposit_all", "withdraw", "inventory_list", "sort_inventory",
           "create_farm", "plant", "harvest", "farm_cycle", "auto_eat", "craft_food",
-          "sequence"
+          "sequence", "find_block"
         ]
       },
       message: { type: "string" },
@@ -579,7 +729,8 @@ const responseSchema = {
                 "place", "build", "fill", "house_plan", "build_house",
                 "mine", "strip_mine", "chop_tree", "gather_wood",
                 "deposit", "deposit_all", "withdraw", "inventory_list", "sort_inventory",
-                "create_farm", "plant", "harvest", "farm_cycle", "auto_eat", "craft_food"
+                "create_farm", "plant", "harvest", "farm_cycle", "auto_eat", "craft_food",
+                "find_block"
               ]
             },
             message: { type: "string" },
@@ -902,7 +1053,8 @@ async function runAIAutonomy(context = {}) {
   if (isThinking || bot.isThinking) return { success: false, reason: 'busy thinking' };
 
   const now = Date.now();
-  if (now - aiAutonomyState.lastPlanAt < config.aiAutonomyIntervalMs) {
+  const forcePlan = !!context.force;
+  if (!forcePlan && now - aiAutonomyState.lastPlanAt < config.aiAutonomyIntervalMs) {
     return { success: false, reason: 'cooldown' };
   }
 
@@ -911,13 +1063,78 @@ async function runAIAutonomy(context = {}) {
   bot._currentTask = 'autonomy:ai_supervisor';
 
   try {
-    const action = await askAutonomousAI(context);
-    if (!action) return { success: false, reason: 'unsafe or invalid plan' };
-    console.log('AI autonomy action:', JSON.stringify(action));
-    await coder.execute(bot, async () => {
-      await executeAction(action);
-    });
-    return { success: true, action };
+    if (aiAutonomyState.mode === 'rl') {
+      const rlEngine = require('./brain/rlEngine');
+      const rlCritic = require('./brain/rlCritic');
+
+      const stateBefore = rlEngine.discretizeState(bot);
+      const snapshotBefore = rlCritic.takeSnapshot(bot);
+
+      const actionName = rlEngine.selectAction(stateBefore, aiAutonomyState.rlStats.epsilon, bot);
+      console.log(`[RL Autonomy] Selected action: ${actionName} for state: ${stateBefore}`);
+
+      let executionSuccess = false;
+      let errorMsg = '';
+      try {
+        const result = await rlEngine.executeRLAction(bot, actionName);
+        executionSuccess = !!result.success;
+        if (result?.error) errorMsg = result.error;
+        else if (result?.reason) errorMsg = result.reason;
+      } catch (err) {
+        errorMsg = err.message;
+      }
+
+      const stateAfter = rlEngine.discretizeState(bot);
+      const evaluation = await rlCritic.recordExperience(bot, `autonomy_rl_${actionName}`, snapshotBefore, executionSuccess, errorMsg);
+
+      const reward = evaluation?.reward || 0;
+      rlEngine.updateQValue(stateBefore, actionName, reward, stateAfter, {
+        terminal: !executionSuccess && /unknown|missing|no .*available|no target|no pickaxe|already sufficient/i.test(errorMsg)
+      });
+
+      // Update local stats
+      aiAutonomyState.rlStats.totalSteps++;
+      aiAutonomyState.rlStats.totalReward += reward;
+      aiAutonomyState.rlStats.lastReward = reward;
+      aiAutonomyState.rlStats.lastAction = actionName;
+      aiAutonomyState.rlStats.lastState = stateBefore;
+      aiAutonomyState.rlStats.epsilon = rlEngine.recommendEpsilon(
+        aiAutonomyState.rlStats.epsilon,
+        aiAutonomyState.rlStats,
+        reward
+      );
+
+      return { success: true, mode: 'rl', action: actionName, reward, epsilon: aiAutonomyState.rlStats.epsilon };
+    } else {
+      const action = await askAutonomousAI(context);
+      if (!action) return { success: false, reason: 'unsafe or invalid plan' };
+      console.log('AI autonomy action:', JSON.stringify(action));
+
+      const rlCritic = require('./brain/rlCritic');
+      const snapshotBefore = rlCritic.takeSnapshot(bot);
+
+      let executionSuccess = true;
+      let errorMsg = '';
+      try {
+        await coder.execute(bot, async () => {
+          const executionResult = await executeAction(action);
+          if (executionResult && executionResult.success === false) {
+            executionSuccess = false;
+            errorMsg = executionResult.error || 'autonomy_action_failed';
+          }
+        });
+      } catch (err) {
+        executionSuccess = false;
+        errorMsg = err.message;
+      }
+
+      // Record critic critique for LLM learning
+      await rlCritic.recordExperience(bot, action.action, snapshotBefore, executionSuccess, errorMsg);
+
+      return executionSuccess
+        ? { success: true, action }
+        : { success: false, action, reason: errorMsg || 'autonomy_action_failed' };
+    }
   } catch (err) {
     aiAutonomyState.lastErrorAt = Date.now();
     console.error('AI autonomy error:', err);
@@ -931,7 +1148,17 @@ async function runAIAutonomy(context = {}) {
   }
 }
 
-// ─── Command Handler ──────────────────────────────────────────────────────────
+function findFailedNode(node) {
+  if (!node) return null;
+  if (node.status === 'failed' && node.type === 'ACTION') {
+    return node;
+  }
+  for (const child of node.children) {
+    const failed = findFailedNode(child);
+    if (failed) return failed;
+  }
+  return null;
+}
 
 async function handleCommand(username, command) {
   bot.lastInteractionTime = Date.now();
@@ -1076,10 +1303,29 @@ async function handleCommand(username, command) {
     }
 
     setPendingResumeTask(command, parsed, { source: 'llm', username });
-    await coder.execute(bot, async () => {
-      await treeExecutor.run(rootNode);
-    });
+    let executeSuccess = true;
+    let executeError = '';
+    try {
+      await coder.execute(bot, async () => {
+        executeSuccess = await treeExecutor.run(rootNode);
+      });
+    } catch (err) {
+      executeSuccess = false;
+      executeError = err.message;
+    }
     clearPendingResumeTask();
+
+    if (!executeSuccess) {
+      const failedNode = findFailedNode(rootNode);
+      const errorDetail = failedNode ? `'${failedNode.data.action}' failed: ${failedNode.label}` : (executeError || 'Unknown task failure');
+      const feedback = `[System Feedback] Plan execution failed: ${errorDetail}`;
+      global.conversationHistory.push({
+        role: 'system',
+        content: feedback
+      });
+      console.log(`[Feedback Loop] Added execution feedback to context: ${feedback}`);
+      bot.chat(`I failed to complete the action sequence: ${failedNode ? failedNode.data.action : 'error'}.`);
+    }
 
   } catch (err) {
     console.error('AI error:', err);
@@ -1098,5 +1344,15 @@ async function handleCommand(username, command) {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
+registerDashboardControls({
+  startBot: startBotFromDashboard,
+  saveSettings: saveSettingsFromDashboard
+});
+
 startDashboardServer(3000);
-createBot();
+refreshDashboardStatus({
+  username: config.username,
+  currentTask: 'Waiting for you to start the bot.',
+  botConnectionState: 'idle',
+  canStartBot: true
+});

@@ -7,8 +7,8 @@ let mainWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 850,
+    width: 1024,
+    height: 765,
     title: "Minecraft Bot Manager",
     webPreferences: {
       nodeIntegration: false,
