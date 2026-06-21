@@ -20,6 +20,20 @@ const ACTIONS = [
   'craft_gear'
 ];
 
+const CORTEX_ACTION_MAP = {
+  idle: 'idle',
+  eat_normal: 'eat',
+  eat_emergency: 'eat',
+  eat_critical: 'eat',
+  procure_food: 'eat',
+  combat: 'fight',
+  flee_and_eat: 'flee',
+  survive_high_threat: 'flee',
+  gather_resources: 'gather_wood',
+  craft_tools: 'craft_gear',
+  upgrade_tools: 'craft_gear',
+};
+
 const HOSTILE_NAMES = ['zombie', 'skeleton', 'creeper', 'spider', 'witch', 'slime', 'drowned', 'husk', 'enderman', 'phantom'];
 
 let qTable = {};
@@ -210,6 +224,24 @@ function selectAction(state, epsilon = DEFAULT_EPSILON, bot = null) {
   return bestAction;
 }
 
+function mapCortexActionToRL(actionName) {
+  return CORTEX_ACTION_MAP[actionName] || null;
+}
+
+function getActionAdvice(bot, epsilon = DEFAULT_EPSILON) {
+  const state = discretizeState(bot);
+  const suggestedAction = selectAction(state, epsilon, bot);
+  const values = getQValues(state);
+  return {
+    state,
+    suggestedAction,
+    qValues: { ...values },
+    mappedCortexActions: Object.entries(CORTEX_ACTION_MAP)
+      .filter(([, rlAction]) => rlAction === suggestedAction)
+      .map(([cortexAction]) => cortexAction),
+  };
+}
+
 function updateQValue(state, action, reward, nextState, options = {}) {
   const currentQ = getQValues(state)[action];
   const terminal = !!options.terminal;
@@ -350,10 +382,13 @@ loadQTable();
 
 module.exports = {
   ACTIONS,
+  CORTEX_ACTION_MAP,
   DEFAULT_EPSILON,
   MIN_EPSILON,
   discretizeState,
   selectAction,
+  mapCortexActionToRL,
+  getActionAdvice,
   updateQValue,
   recommendEpsilon,
   executeRLAction,

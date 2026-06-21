@@ -145,7 +145,7 @@ function registerDashboardControls(handlers = {}) {
 function updateBotInstance(newBot) {
   if (botInstance) {
     try {
-      botInstance.removeAllListeners('physicTick');
+      botInstance.removeAllListeners('physicsTick');
       botInstance.removeAllListeners('chat');
       if (botInstance.inventory) {
         botInstance.inventory.removeAllListeners('updateSlot');
@@ -157,7 +157,7 @@ function updateBotInstance(newBot) {
   if (!newBot) return;
 
   let lastEmit = 0;
-  newBot.on('physicTick', () => {
+  newBot.on('physicsTick', () => {
     const now = Date.now();
     if (now - lastEmit < 500) return;
     lastEmit = now;

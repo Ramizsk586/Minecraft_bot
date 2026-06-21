@@ -40,7 +40,7 @@ function buildLlmConfig() {
   return {
     provider,
     llmApiBase: envValue('LLM_API_BASE') || (provider === 'ollama'
-      ? 'http://localhost:11434/v1'
+      ? 'https://ollama.com/v1'
       : 'https://openrouter.ai/api/v1'),
     llmApiKey: envValue('MODEL_KEY') || envValue('LLM_API_KEY') || envValue('OPENROUTER_API_KEY'),
     llmModel: envValue('LLM_MODEL') || (provider === 'ollama' ? 'llama3' : 'openai/gpt-4o-mini'),
@@ -152,6 +152,7 @@ async function resumePendingTaskIfNeeded() {
   bot._resumingTask = true;
   bot._currentTask = `resume:${task.command}`;
   bot.lastInteractionTime = Date.now();
+  bot.lastUserInteractionTime = 0;
 
   try {
     await sleep(2500);

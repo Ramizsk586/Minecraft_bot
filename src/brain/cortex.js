@@ -11,6 +11,8 @@
 'use strict';
 
 const { sleep } = require('../utils');
+const rlEngine = require('./rlEngine');
+const rlCritic = require('./rlCritic');
 
 // ─── Brain Dependencies ──────────────────────────────────────────────────────
 
@@ -133,6 +135,14 @@ const _state = {
   deathRecovery:    null,
   surviveActive:    false,  // whether autonomous mode is engaged
   autonomyBlocks:   {},
+  rlStats: {
+    epsilon: rlEngine.DEFAULT_EPSILON,
+    totalSteps: 0,
+    totalReward: 0,
+    lastReward: 0,
+    lastAdvice: null,
+    lastState: null,
+  },
 };
 
 const DEATH_RECOVERY_MAX_DISTANCE = 96;
@@ -464,6 +474,70 @@ function markActionFinished(action, failed = false) {
 function clearAutonomyBlock(key) {
   if (!key) return;
   delete _state.autonomyBlocks[key];
+}
+
+function shouldEscalateToLLM(reason = '', situation = null) {
+  const text = String(reason || '').toLowerCase();
+  if (!text) return false;
+  if (/missing|unknown|no crafting table|no pickaxe|no tool|cannot|can't|blocked|stuck|unavailable|failed/.test(text)) {
+    return true;
+  }
+  if (situation && situation.survivalScore >= 60 && situation.threatReport?.level === 'none') {
+    return /idle|nothing|insufficient|no target/.test(text);
+  }
+  return false;
+}
+
+async function maybeAskCoreLLMForDirection(trigger, detail = {}, situation = null) {
+  if (!_bot?.runAIAutonomy || !_bot?.aiAutonomy?.enabled) return false;
+  const result = await _bot.runAIAutonomy({
+    force: true,
+    trigger,
+    detail,
+    survivalScore: situation?.survivalScore ?? _state.lastSurvivalScore,
+    biomeCategory: situation?.biomeCategory,
+    biomeRisk: situation?.biomeRisk,
+    topPriorities: situation?.biomeStrategy?.priorities?.slice(0, 4) || [],
+    lastAction: _state.lastAction,
+    persistentGoal: _state.persistentGoal,
+    rlAdvice: _state.rlStats.lastAdvice,
+  });
+  if (!result.success) {
+    log(`Core LLM fallback skipped: ${result.reason || 'unknown reason'}`);
+    return false;
+  }
+  return true;
+}
+
+function chooseActionWithRL(actions, situation) {
+  const selected = chooseBestAction(actions);
+  if (!selected) return null;
+
+  const advice = rlEngine.getActionAdvice(_bot, _state.rlStats.epsilon);
+  _state.rlStats.lastAdvice = advice;
+  _state.rlStats.lastState = advice.state;
+
+  const mapped = advice.mappedCortexActions || [];
+  if (mapped.length === 0) return selected;
+
+  const preferred = actions
+    .filter(action => mapped.includes(action.name))
+    .sort((a, b) => b.priority - a.priority)[0];
+
+  if (!preferred) return selected;
+
+  const selectedPriority = selected.priority || 0;
+  const preferredPriority = preferred.priority || 0;
+  const safeToBias = Math.abs(preferredPriority - selectedPriority) <= 10
+    && situation.threatReport?.level !== 'high'
+    && situation.survivalScore >= 35;
+
+  if (safeToBias && preferred.name !== selected.name) {
+    log(`RL advisor nudged action from ${selected.name} to ${preferred.name} (state=${advice.state}, suggestion=${advice.suggestedAction})`);
+    return preferred;
+  }
+
+  return selected;
 }
 
 function noteAutonomyBlock(key, detail = {}) {
@@ -1141,7 +1215,7 @@ function selectAction(situation) {
     });
   }
 
-  return chooseBestAction(actions);
+  return chooseActionWithRL(actions, situation);
 }
 
 // ─── Sub-actions (extracted from survive.js) ─────────────────────────────────
@@ -1559,11 +1633,11 @@ async function cortexTick() {
   if (!_running || !_bot) return;
 
   // Skip if user is actively interacting or LLM is thinking
-  const timeSinceInteraction = Date.now() - (_bot.lastInteractionTime || 0);
+  const timeSinceInteraction = Date.now() - (_bot.lastUserInteractionTime || 0);
   const isPlayerBusy = shouldTreatAsExternalActiveTask(_bot._currentTask);
   const isThinking = _bot.isThinking;
 
-  if (timeSinceInteraction < 1000 || isPlayerBusy || isThinking) {
+  if (timeSinceInteraction < 1000) {
     if (_state.surviveActive) {
       log('User activity detected. Deactivating autonomous mode.');
       _state.surviveActive = false;
@@ -1572,6 +1646,10 @@ async function cortexTick() {
       _bot.setControlState('sprint', false);
       releaseLock();
     }
+    return;
+  }
+
+  if (isPlayerBusy || isThinking) {
     return;
   }
 
@@ -1601,7 +1679,17 @@ async function cortexTick() {
 
     // 2. Select the best action
     let action = selectAction(situation);
-    if (!action) return;
+    if (!action) {
+      await maybeAskCoreLLMForDirection('no_core_action', {
+        reason: 'cortex_no_action_available',
+        situationSummary: {
+          survivalScore: situation.survivalScore,
+          threat: situation.threatReport?.level,
+          biome: situation.biomeCategory,
+        },
+      }, situation);
+      return;
+    }
 
     if (shouldKeepPersistentGoal() && action.name !== _state.persistentGoal && isMaintenanceAction(action.name)) {
       log(`Keeping persistent goal: ${_state.persistentGoal} (skip maintenance ${action.name})`);
@@ -1630,12 +1718,37 @@ async function cortexTick() {
     _bot._currentTask = `cortex:${action.name}`;
 
     let actionFailed = false;
+    let failureReason = '';
+    const snapshotBefore = rlCritic.takeSnapshot(_bot);
     try {
       await action.execute();
     } catch (err) {
       actionFailed = true;
+      failureReason = err.message;
       log(`Action ${action.name} failed: ${err.message}`);
+      if (shouldEscalateToLLM(err.message, situation)) {
+        await maybeAskCoreLLMForDirection('core_action_failed', {
+          action: action.name,
+          reason: err.message,
+        }, situation);
+      }
     } finally {
+      if (snapshotBefore) {
+        const rlAction = rlEngine.mapCortexActionToRL(action.name);
+        const evaluation = await rlCritic.recordExperience(_bot, `cortex_${action.name}`, snapshotBefore, !actionFailed, failureReason);
+        const reward = evaluation?.reward || 0;
+        _state.rlStats.totalSteps += 1;
+        _state.rlStats.totalReward += reward;
+        _state.rlStats.lastReward = reward;
+        _state.rlStats.epsilon = rlEngine.recommendEpsilon(_state.rlStats.epsilon, _state.rlStats, reward);
+
+        if (rlAction && _state.rlStats.lastState) {
+          const nextState = rlEngine.discretizeState(_bot);
+          rlEngine.updateQValue(_state.rlStats.lastState, rlAction, reward, nextState, {
+            terminal: actionFailed && shouldEscalateToLLM(failureReason, situation),
+          });
+        }
+      }
       markActionFinished(action, actionFailed);
       releaseLock(action.name);
       if (_bot._currentTask === `cortex:${action.name}`) {
@@ -1699,6 +1812,14 @@ function start(bot, options = {}) {
   _state.announcements = {};
   _state.actionCooldowns = {};
   _state.actionFailures = {};
+  _state.rlStats = {
+    epsilon: rlEngine.DEFAULT_EPSILON,
+    totalSteps: 0,
+    totalReward: 0,
+    lastReward: 0,
+    lastAdvice: null,
+    lastState: null,
+  };
   _state.autonomyBlocks = {};
 
   // Death snapshot listener
@@ -1764,6 +1885,7 @@ function getStatus() {
     cooldowns: { ..._state.actionCooldowns },
     failures: { ..._state.actionFailures },
     autonomyBlocks: { ..._state.autonomyBlocks },
+    rlStats: { ..._state.rlStats },
     aiAutonomy: _bot?.aiAutonomy ? { ..._bot.aiAutonomy } : null,
     biome: biomePlan ? {
       name: biomePlan.name,
