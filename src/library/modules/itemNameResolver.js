@@ -30,6 +30,7 @@ function resolveItemName(name) {
     'dirt': 'dirt',
     'grass': 'grass_block',
     'sand': 'sand',
+    'wool': 'white_wool',
     
     // Tools
     'sword': 'iron_sword',

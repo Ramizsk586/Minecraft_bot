@@ -352,6 +352,35 @@ async function huntMobForDrop(bot, dropName, count = 1, options = {}) {
   const maxKills = options.maxKills || Math.max(1, count * 3);
   let kills = 0;
 
+  if (desiredDrop === 'white_wool') {
+    const shears = bot.inventory.items().find(item => item.name === 'shears');
+    if (shears) {
+      const { goals } = require('mineflayer-pathfinder');
+      const sheep = bot.nearestEntity(entity =>
+        entity &&
+        entity.isValid &&
+        entity.name === 'sheep' &&
+        entity.type !== 'object' &&
+        entity.position.distanceTo(bot.entity.position) <= (options.maxDistance || 32)
+      );
+
+      if (sheep) {
+        try {
+          if (!silent) {
+            bot.chat('Shearing sheep for wool.');
+          }
+          await bot.equip(shears, 'hand');
+          await bot.pathfinder.goto(new goals.GoalNear(sheep.position.x, sheep.position.y, sheep.position.z, 2));
+          await bot.lookAt(sheep.position.offset(0, 1, 0), true);
+          await bot.activateEntity(sheep);
+          await collectDrops(bot, goals, 500, { maxDistance: 12, maxItems: 10, passes: 2 });
+        } catch (err) {
+          console.log(`[Wool] Sheep shearing failed: ${err.message}`);
+        }
+      }
+    }
+  }
+
   while ((countInventoryItem(bot, desiredDrop) - beforeCount) < count && kills < maxKills) {
     const target = findNearestMobForDrop(bot, desiredDrop, { maxDistance: options.maxDistance || 32 });
     if (!target) {
@@ -417,8 +446,16 @@ async function huntMobForDrop(bot, dropName, count = 1, options = {}) {
  * @returns {Promise<{ate: boolean, item: string|null, foodBefore: number, foodAfter: number}>}
  */
 async function eat(bot, options = {}) {
-  const { silent = false, force = false, threatLevel = 'none', preferCooking = false } = options;
+  const { silent = false, force = false, threatLevel = 'none', preferCooking = false, itemName = null } = options;
   const foodBefore = bot.food;
+
+  if (bot._eatInFlight) {
+    try {
+      return await bot._eatInFlight;
+    } catch {
+      // Retry below if the previous eat attempt failed.
+    }
+  }
 
   // Don't eat if full (unless forced)
   if (foodBefore >= 20 && !force) {
@@ -431,79 +468,111 @@ async function eat(bot, options = {}) {
     return { ate: false, item: null, foodBefore, foodAfter: foodBefore };
   }
 
-  let best = pickBestFood(bot);
-  const cookingPreferred = preferCooking || shouldCookBeforeEating(bot, {
-    threatLevel,
-    health: bot.health,
-    food: foodBefore,
-    force,
-  });
+  const attempt = (async () => {
+    let best = null;
 
-  if (cookingPreferred) {
-    try {
-      await require('../cook').cookBestFood(bot);
-    } catch {}
+    if (itemName) {
+      const normalized = String(itemName).trim().replace(/\s+/g, '_').toLowerCase();
+      const specificItem = bot.inventory.items().find(i => i.name === normalized || i.name.includes(normalized) || normalized.includes(i.name));
+      if (!specificItem) {
+        return { ate: false, item: null, foodBefore, foodAfter: foodBefore, reason: 'item_not_found' };
+      }
 
-    best = pickBestFood(bot);
-  }
+      const specificData = FOOD_DB[specificItem.name];
+      if (!specificData) {
+        if (!silent) bot.chat(`${specificItem.name} is not edible!`);
+        return { ate: false, item: specificItem.name, foodBefore, foodAfter: foodBefore, reason: 'not_edible' };
+      }
 
-  if (!best) {
-    best = pickBestImmediateFood(bot, { allowHarmful: foodBefore <= 6 || force });
-  }
+      best = {
+        item: specificItem,
+        foodData: specificData,
+        score: calculateEfficiency(specificItem.name, 20 - foodBefore, foodBefore),
+        reason: 'requested item',
+      };
+    } else {
+      best = pickBestFood(bot);
+      const cookingPreferred = preferCooking || shouldCookBeforeEating(bot, {
+        threatLevel,
+        health: bot.health,
+        food: foodBefore,
+        force,
+      });
 
-  if (!best) {
-    // Try to craft food before giving up
-    try {
-      const craftBrain = require('./craft');
-      const craftResult = await craftBrain.craftFoodIfPossible(bot, { silent: true });
-      if (craftResult.success) {
-        console.log('🧠 Brain:Eat auto-crafted food: ' + craftResult.crafted);
+      if (cookingPreferred) {
+        try {
+          await require('../cook').cookBestFood(bot);
+        } catch {}
+
         best = pickBestFood(bot);
       }
-    } catch (err) {
-      console.log('🧠 Brain:Eat craft-food failed: ' + err.message);
-    }
-    if (!best) {
-      const shouldHuntCook = !force && bot.health >= 12 && foodBefore >= 8 && threatLevel === 'none';
-      const huntResult = await huntPassiveFood(bot, { silent }).catch(err => ({ success: false, reason: err.message }));
-      if (huntResult.success) {
-        if (shouldHuntCook) {
-          try {
-            await require('../cook').cookBestFood(bot);
-          } catch {}
+
+      if (!best) {
+        best = pickBestImmediateFood(bot, { allowHarmful: foodBefore <= 6 || force });
+      }
+
+      if (!best) {
+        try {
+          const craftBrain = require('./craft');
+          const craftResult = await craftBrain.craftFoodIfPossible(bot, { silent: true });
+          if (craftResult.success) {
+            console.log('🧠 Brain:Eat auto-crafted food: ' + craftResult.crafted);
+            best = pickBestFood(bot);
+          }
+        } catch (err) {
+          console.log('🧠 Brain:Eat craft-food failed: ' + err.message);
         }
-        best = pickBestFood(bot) || pickBestImmediateFood(bot, { allowHarmful: foodBefore <= 6 || force });
+        if (!best) {
+          const shouldHuntCook = !force && bot.health >= 12 && foodBefore >= 8 && threatLevel === 'none';
+          const huntResult = await huntPassiveFood(bot, { silent }).catch(err => ({ success: false, reason: err.message }));
+          if (huntResult.success) {
+            if (shouldHuntCook) {
+              try {
+                await require('../cook').cookBestFood(bot);
+              } catch {}
+            }
+            best = pickBestFood(bot) || pickBestImmediateFood(bot, { allowHarmful: foodBefore <= 6 || force });
+          }
+        }
+        if (!best) {
+          if (!silent) bot.chat('No food in inventory, nothing craftable, and no meat source found!');
+          return { ate: false, item: null, foodBefore, foodAfter: foodBefore, reason: 'no_food' };
+        }
       }
     }
-    if (!best) {
-      if (!silent) bot.chat('No food in inventory, nothing craftable, and no meat source found!');
-      return { ate: false, item: null, foodBefore, foodAfter: foodBefore };
-    }
-  }
 
-  try {
-    await bot.equip(best.item, 'hand');
-    await bot.consume();
-    const foodAfter = bot.food;
+    try {
+      await bot.equip(best.item, 'hand');
+      await bot.consume();
+      const foodAfter = bot.food;
 
-    if (!silent) {
-      const deficit = 20 - foodBefore;
-      bot.chat(
-        `🍖 Ate ${best.item.name} (+${best.foodData.hunger} hunger, +${best.foodData.saturation} sat) ` +
-        `| ${foodBefore}→${foodAfter}/20 | ${best.reason}`
+      if (!silent) {
+        bot.chat(
+          `🍖 Ate ${best.item.name} (+${best.foodData.hunger} hunger, +${best.foodData.saturation} sat) ` +
+          `| ${foodBefore}→${foodAfter}/20 | ${best.reason}`
+        );
+      }
+
+      console.log(
+        `🧠 Brain:Eat → ${best.item.name} (score: ${Number(best.score || 0).toFixed(2)}, ` +
+        `${best.reason}) | food: ${foodBefore}→${bot.food}/20`
       );
+
+      return { ate: true, item: best.item.name, foodBefore, foodAfter: bot.food, reason: 'ate' };
+    } catch (err) {
+      console.log(`🧠 Brain:Eat failed: ${err.message}`);
+      if (!silent) bot.chat(`Couldn't eat: ${err.message}`);
+      return { ate: false, item: null, foodBefore, foodAfter: foodBefore, reason: err.message };
     }
+  })();
 
-    console.log(
-      `🧠 Brain:Eat → ${best.item.name} (score: ${best.score.toFixed(2)}, ` +
-      `${best.reason}) | food: ${foodBefore}→${bot.food}/20`
-    );
-
-    return { ate: true, item: best.item.name, foodBefore, foodAfter: bot.food };
-  } catch (err) {
-    console.log(`🧠 Brain:Eat failed: ${err.message}`);
-    if (!silent) bot.chat(`Couldn't eat: ${err.message}`);
-    return { ate: false, item: null, foodBefore, foodAfter: foodBefore };
+  bot._eatInFlight = attempt;
+  try {
+    return await attempt;
+  } finally {
+    if (bot._eatInFlight === attempt) {
+      bot._eatInFlight = null;
+    }
   }
 }
 

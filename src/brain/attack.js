@@ -255,6 +255,32 @@ function stopMovement(bot) {
   bot.clearControlStates();
 }
 
+function hasShieldEquipped(bot) {
+  return bot.inventory.slots[45]?.name === 'shield';
+}
+
+function setShieldBlocking(bot, shouldBlock) {
+  if (!hasShieldEquipped(bot)) return false;
+
+  if (shouldBlock) {
+    if (!bot._combatState?.isBlocking) {
+      try {
+        bot.activateItem?.();
+        if (bot._combatState) bot._combatState.isBlocking = true;
+      } catch {}
+    }
+    return true;
+  }
+
+  if (bot._combatState?.isBlocking) {
+    try {
+      bot.deactivateItem?.();
+    } catch {}
+    if (bot._combatState) bot._combatState.isBlocking = false;
+  }
+  return true;
+}
+
 function isPassableCombatBlock(block) {
   if (!block) return true;
   if (PASSABLE_BLOCKS.has(block.name)) return true;
@@ -413,6 +439,7 @@ function canUseRanged(bot, weaponData, distance) {
 }
 
 async function fireRanged(bot, target, weaponData) {
+  setShieldBlocking(bot, false);
   try {
     await bot.lookAt(target.position.offset(0, 1.3, 0), true);
   } catch {}
@@ -429,6 +456,7 @@ async function strikeMelee(bot, target, weapon = null) {
     return false;
   }
 
+  setShieldBlocking(bot, false);
   try {
     await bot.lookAt(target.position.offset(0, 1.0, 0), true);
   } catch {}
@@ -485,6 +513,7 @@ async function startAttack(bot, target, options = {}) {
     timeoutTimer: null,
     strafeDir: 'left',
     lastStrafeSwitch: 0,
+    isBlocking: false,
     coordinatorToken: combatToken || null,
   };
 
@@ -544,6 +573,15 @@ async function startAttack(bot, target, options = {}) {
     const weapon = await prepareCombatWeapon(bot);
     const weaponData = weapon?.weaponData || null;
     const obstacle = findCombatObstacle(bot, activeTarget);
+    const hasShield = hasShieldEquipped(bot);
+    const isRangedThreat = ['skeleton', 'stray', 'pillager'].includes(activeTarget.name);
+    const isExplosiveThreat = ['creeper'].includes(activeTarget.name);
+    const shouldBlock =
+      hasShield && (
+        (isRangedThreat && distance >= 4 && distance <= 16) ||
+        (isExplosiveThreat && distance <= 5) ||
+        (bot.health <= 10 && distance <= 3.5)
+      );
 
     if (state.isDiggingPath) {
       return;
@@ -557,13 +595,7 @@ async function startAttack(bot, target, options = {}) {
     }
 
     approachTarget(bot, activeTarget, distance, state);
-
-    // Active shield usage against skeletons
-    if (activeTarget.name === 'skeleton' && distance > 5 && distance < 15 && shield) {
-      bot.activateItem('off-hand');
-      await sleep(350);
-      bot.deactivateItem('off-hand');
-    }
+    setShieldBlocking(bot, shouldBlock);
 
     if (!weaponData) {
       if (Date.now() - state.lastTauntAt > TAUNT_COOLDOWN_MS) {
@@ -587,6 +619,9 @@ async function startAttack(bot, target, options = {}) {
       bot.setControlState('sprint', false);
       await fireRanged(bot, activeTarget, weaponData).catch(() => strikeMelee(bot, activeTarget, weapon).catch(() => {}));
     } else {
+      if (shouldBlock && distance > 3.2) {
+        return;
+      }
       if (obstacle && distance <= 4.5) {
         const tunneled = await digTowardTarget(bot, activeTarget, state).catch(() => false);
         if (tunneled) return;

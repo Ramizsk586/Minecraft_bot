@@ -1177,6 +1177,7 @@ function findFailedNode(node) {
 }
 
 async function handleCommand(username, command) {
+  bot.lastUserInteractionTime = Date.now();
   bot.lastInteractionTime = Date.now();
 
   if (command === 'help') {
@@ -1251,12 +1252,16 @@ async function handleCommand(username, command) {
     const handled = await brain.tryHandle(bot, command, username);
     if (handled) {
       console.log(`🧠 Brain handled: "${command}"`);
-      bot._currentTask = null;
+      if (bot._currentTask === command) {
+        bot._currentTask = null;
+      }
       return;
     }
   } catch (err) {
     console.log(`🧠 Brain error: ${err.message}`);
-    bot._currentTask = null;
+    if (bot._currentTask === command) {
+      bot._currentTask = null;
+    }
     // Fall through to LLM
   }
 

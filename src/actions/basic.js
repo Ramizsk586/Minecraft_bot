@@ -8,6 +8,14 @@ function register(bot, goals) {
   // Reference to the action executor (set later by the dispatcher)
   let executeAction = null;
 
+  function clearFollowState() {
+    if (bot._followInterval) {
+      clearInterval(bot._followInterval);
+      bot._followInterval = null;
+    }
+    bot._followTarget = null;
+  }
+
   function setExecutor(fn) {
     executeAction = fn;
   }
@@ -38,105 +46,15 @@ function register(bot, goals) {
         return;
       }
       bot.chat(`Attacking ${action.target}!`);
-
-      // Equip shield in off-hand if available
-      const shield = bot.inventory.items().find(item => item.name.includes('shield'));
-      if (shield) {
-        try {
-          await bot.equip(shield, 'off-hand');
-        } catch (err) {
-          console.log(`Failed to equip shield: ${err.message}`);
-        }
+      const attackBrain = require('../brain/attack');
+      const result = await attackBrain.startAttack(bot, target, {});
+      if (!result?.started) {
+        bot.chat(`Couldn't attack ${action.target}: ${result?.reason || 'unknown reason'}.`);
       }
-
-      // Find and equip highest attack weapon
-      let weapons = bot.inventory.items().filter(item => 
-        item.name.includes('sword') || (item.name.includes('axe') && !item.name.includes('pickaxe'))
-      );
-      if (weapons.length === 0) {
-        weapons = bot.inventory.items().filter(item => 
-          item.name.includes('pickaxe') || item.name.includes('shovel')
-        );
-      }
-      if (weapons.length > 0) {
-        const getWeaponTier = (name) => {
-          if (name.includes('netherite')) return 6;
-          if (name.includes('diamond')) return 5;
-          if (name.includes('iron')) return 4;
-          if (name.includes('stone')) return 3;
-          if (name.includes('gold')) return 2;
-          return 1;
-        };
-        weapons.sort((a, b) => {
-          const dmgA = a.attackDamage || getWeaponTier(a.name);
-          const dmgB = b.attackDamage || getWeaponTier(b.name);
-          return dmgB - dmgA;
-        });
-        try {
-          await bot.equip(weapons[0], 'hand');
-        } catch (err) {
-          console.log(`Failed to equip weapon: ${err.message}`);
-        }
-      }
-
-      const initialTask = bot._currentTask;
-      
-      // Start mineflayer-pvp attack behavior
-      if (bot.pvp) {
-        bot.pvp.attack(target);
-      } else {
-        bot.attack(target);
-      }
-
-      const isCreeperOrPhantom = target.name === 'creeper' || target.name === 'phantom';
-
-      try {
-        const Movements = require('mineflayer-pathfinder').Movements;
-        
-        while (target.isValid && bot.entities[target.id]) {
-          // Interruption check
-          if (bot._currentTask !== initialTask) {
-            break;
-          }
-
-          const distance = bot.entity.position.distanceTo(target.position);
-
-          // KITING: If target gets too close (distance <= 2), back away
-          if (distance <= 2) {
-            try {
-              bot.pathfinder.setMovements(new Movements(bot));
-              const escapeGoal = new goals.GoalInvert(new goals.GoalFollow(target, 2));
-              await bot.pathfinder.goto(escapeGoal);
-            } catch (err) {
-              // Ignore pathfinder errors if entity dies or moves
-            }
-          } 
-          // APPROACHING: Move closer only if target is far AND is not a creeper/phantom
-          else if (distance >= 4 && !isCreeperOrPhantom) {
-            try {
-              bot.pathfinder.setMovements(new Movements(bot));
-              await bot.pathfinder.goto(new goals.GoalFollow(target, 3.5));
-            } catch (err) {
-              // Ignore errors
-            }
-          }
-
-          // Yield tick
-          await sleep(250);
-        }
-      } catch (err) {
-        console.error('Combat loop error:', err);
-      } finally {
-        if (bot.pvp) {
-          bot.pvp.stop();
-        }
-        bot.pathfinder.stop();
-      }
-      
-      bot.chat(`Finished combat with ${action.target}.`);
     },
 
     follow: async (action) => {
+      clearFollowState();
       const player = bot.players[action.player];
       if (!player?.entity) {
         bot.chat(`Can't see ${action.player}.`);
@@ -144,20 +62,24 @@ function register(bot, goals) {
       }
       bot.chat(`Following ${action.player}.`);
       bot._currentTask = `following ${action.player}`;
-      const followInterval = setInterval(() => {
+      bot._followTarget = action.player;
+      bot.lastUserInteractionTime = Date.now();
+      bot.pathfinder.setGoal(new goals.GoalFollow(player.entity, 3), true);
+      bot._followInterval = setInterval(() => {
         const p = bot.players[action.player]?.entity;
         if (!p || bot._currentTask !== `following ${action.player}`) {
-          clearInterval(followInterval);
+          clearFollowState();
           return;
         }
         const dist = p.position.distanceTo(bot.entity.position);
-        if (dist > 4) {
+        if (dist > 2.5) {
           bot.pathfinder.setGoal(new goals.GoalFollow(p, 3), true);
         }
       }, 1000);
     },
 
     stop: async () => {
+      clearFollowState();
       bot.pathfinder.setGoal(null);
       bot._currentTask = null;
       bot.chat('Stopped current task.');
@@ -214,14 +136,11 @@ function register(bot, goals) {
     },
 
     eat: async (action) => {
-      const food = bot.inventory.items().find(i => i.name === action.item);
-      if (!food) {
+      const eatBrain = require('../brain/eat');
+      const result = await eatBrain.eat(bot, { silent: false, force: true, itemName: action.item });
+      if (!result.ate && result.reason === 'item_not_found') {
         bot.chat(`Don't have ${action.item} to eat.`);
-        return;
       }
-      await bot.equip(food, 'hand');
-      await bot.consume();
-      bot.chat(`Ate ${action.item}. Food: ${bot.food}/20`);
     },
 
     collect: async (action) => {

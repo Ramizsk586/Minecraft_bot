@@ -43,5 +43,149 @@
     "gather_wood": 0,
     "mine_stone": 0,
     "craft_gear": 0
+  },
+  "high:hungry:none:day:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:hungry:none:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:hungry:nearby:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 4,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:hungry:attacked:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 4,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "mid:hungry:nearby:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 11.7616,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "mid:hungry:none:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 13.002799999999999,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "mid:hungry:attacked:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "low:hungry:none:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 35.11066254578226,
+    "fight": 0,
+    "flee": 12.439372258688001,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "low:hungry:nearby:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 10.335919258240807,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "low:hungry:none:day:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 5.6000000000000005,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "low:full:none:day:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 6.800000000000001,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "mid:full:none:day:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:full:none:day:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 7.632816016000001,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 20.1823112
+  },
+  "high:full:none:night:enough:low:nofood:none": {
+    "idle": 4.016,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:full:nearby:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 4,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:full:attacked:night:enough:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
   }
 }

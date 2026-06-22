@@ -11,6 +11,7 @@ const chatBrain = require('./chat');
 const stuckBrain = require('./stuck');
 const swimBrain = require('./swim');
 const cortex = require('./cortex');
+const { resolveItemName } = require('../library/modules/itemNameResolver');
 
 let _brainBot = null;
 let _brainOptions = {};
@@ -334,34 +335,13 @@ async function eatGeneral(bot) {
 }
 
 async function eatSpecific(bot, foodName) {
-  const normalized = foodName.replace(/\s+/g, '_').toLowerCase();
-  const item = bot.inventory.items().find(i => i.name === normalized || i.name.includes(normalized) || normalized.includes(i.name));
-
-  if (!item) {
+  const result = await eatBrain.eat(bot, { silent: false, force: true, itemName: foodName });
+  if (!result.ate && result.reason === 'item_not_found') {
     bot.chat(`Don't have ${foodName} in inventory.`);
     const best = eatBrain.pickBestFood(bot);
     if (best) {
       bot.chat(`Best available: ${best.item.name} x${best.item.count} (${best.reason})`);
     }
-    return true;
-  }
-
-  const foodData = eatBrain.getFoodData(item.name);
-  if (!foodData) {
-    bot.chat(`${item.name} is not edible!`);
-    return true;
-  }
-
-  if (foodData.harmful) {
-    bot.chat(`${item.name} is harmful (${foodData.effect}) - eating anyway...`);
-  }
-
-  try {
-    await bot.equip(item, 'hand');
-    await bot.consume();
-    bot.chat(`Ate ${item.name} (+${foodData.hunger} hunger, +${foodData.saturation} sat) | Food: ${bot.food}/20`);
-  } catch (err) {
-    bot.chat(`Couldn't eat ${item.name}: ${err.message}`);
   }
 
   return true;
@@ -515,12 +495,13 @@ async function stopFollowing(bot) {
 }
 
 async function handleCollectCommand(bot, username, targetName) {
+  const data = require('../library/data');
   if (!bot.executeAction) {
     bot.chat('Collect action is not ready yet.');
     return true;
   }
 
-  const normalizedTarget = targetName ? targetName.trim().replace(/\s+/g, '_').toLowerCase() : null;
+  const normalizedTarget = targetName ? resolveItemName(targetName) : null;
   const gatherWoodTargets = new Set(['wood', 'log', 'logs', 'tree', 'trees', 'oak_log', 'spruce_log', 'birch_log', 'jungle_log']);
 
   if (
@@ -533,6 +514,13 @@ async function handleCollectCommand(bot, username, targetName) {
     return await handleMineCommand(bot, `gather ${normalizedTarget}`, 'wood');
   }
 
+  if (normalizedTarget) {
+    const mobDrops = data.getMobsForDrop(normalizedTarget);
+    if (mobDrops.length > 0) {
+      return await handleHuntDropCommand(bot, username, normalizedTarget, 1);
+    }
+  }
+
   await bot.executeAction({
     action: 'collect',
     item: normalizedTarget,
@@ -543,7 +531,7 @@ async function handleCollectCommand(bot, username, targetName) {
 
 async function handleMobDropInfo(bot, itemName) {
   const data = require('../library/data');
-  const normalized = itemName.trim().replace(/\s+/g, '_').toLowerCase();
+  const normalized = resolveItemName(itemName);
   const mobs = data.getMobsForDrop(normalized);
   if (!mobs.length) {
     bot.chat(`I don't know any mob that drops ${normalized}.`);
@@ -557,7 +545,7 @@ async function handleMobDropInfo(bot, itemName) {
 
 async function handleHuntDropCommand(bot, username, itemName, count = 1) {
   const data = require('../library/data');
-  const normalized = itemName.trim().replace(/\s+/g, '_').toLowerCase();
+  const normalized = resolveItemName(itemName);
   const mobs = data.getMobsForDrop(normalized);
   if (!mobs.length) {
     return false;
