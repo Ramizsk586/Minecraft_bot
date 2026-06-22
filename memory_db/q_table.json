@@ -1,6 +1,6 @@
 {
-  "low:starving:attacked:night:enough:low": {
-    "idle": 10,
+  "high:hungry:none:night:low:low:nofood:none": {
+    "idle": 0,
     "eat": 0,
     "fight": 0,
     "flee": 0,
@@ -8,10 +8,37 @@
     "mine_stone": 0,
     "craft_gear": 0
   },
-  "high:full:none:day:enough:enough": {
+  "high:hungry:nearby:night:low:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 4,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "mid:hungry:nearby:night:low:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 4,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "mid:hungry:attacked:night:low:low:nofood:none": {
     "idle": 0,
     "eat": 0,
     "fight": 0,
+    "flee": 0,
+    "gather_wood": 0,
+    "mine_stone": 0,
+    "craft_gear": 0
+  },
+  "high:hungry:none:day:low:low:nofood:none": {
+    "idle": 0,
+    "eat": 0,
+    "fight": 4,
     "flee": 0,
     "gather_wood": 0,
     "mine_stone": 0,

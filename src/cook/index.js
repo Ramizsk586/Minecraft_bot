@@ -235,6 +235,7 @@ module.exports = {
   findNearbyCookingBlock,
   ensureFurnacePlaced,
   collectTemporaryFurnace,
+  ensureFuel,
   smeltItem,
   cookBestFood,
   smeltBestOre,

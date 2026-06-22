@@ -990,13 +990,18 @@ async function askAutonomousAI(context = {}) {
     return { action: 'chat', message: 'AI autonomy disabled: missing model key.' };
   }
 
+  const goalReadiness = require('./brain/goalReadiness');
   const worldState = getWorldState(bot);
   const cortexStatus = brain.cortex?.getStatus?.() || {};
+  const readiness = goalReadiness.buildAutonomyReadiness(bot);
   const prompt = [
     worldState,
     '',
     '=== CORTEX STATUS ===',
     JSON.stringify(cortexStatus, null, 2),
+    '',
+    '=== INVENTORY / GOAL READINESS ===',
+    JSON.stringify(readiness, null, 2),
     '',
     '=== AUTONOMY CONTEXT ===',
     JSON.stringify(context, null, 2),
@@ -1109,6 +1114,16 @@ async function runAIAutonomy(context = {}) {
     } else {
       const action = await askAutonomousAI(context);
       if (!action) return { success: false, reason: 'unsafe or invalid plan' };
+      const goalReadiness = require('./brain/goalReadiness');
+      const preflight = goalReadiness.evaluateActionReadiness(bot, action);
+      if (!preflight.ready) {
+        return {
+          success: false,
+          action,
+          reason: `goal_not_ready:${preflight.reason}`,
+          missing: preflight.missing || [],
+        };
+      }
       console.log('AI autonomy action:', JSON.stringify(action));
 
       const rlCritic = require('./brain/rlCritic');
@@ -1233,7 +1248,7 @@ async function handleCommand(username, command) {
   // ── Brain intercept: handle simple commands instantly ──
   try {
     bot._currentTask = command;
-    const handled = await brain.tryHandle(bot, command);
+    const handled = await brain.tryHandle(bot, command, username);
     if (handled) {
       console.log(`🧠 Brain handled: "${command}"`);
       bot._currentTask = null;

@@ -1,4 +1,5 @@
 const { sleep } = require('../utils');
+const inventoryManager = require('../brain/inventoryManager');
 
 function register(bot, goals) {
   const { GoalNear } = goals;
@@ -82,7 +83,7 @@ function register(bot, goals) {
      * Action: { "action": "deposit_all", "keep": ["diamond_pickaxe", "diamond_sword", "bread"] }
      */
     deposit_all: async (action) => {
-      const keepList = action.keep || [];
+      const keepList = action.keep || inventoryManager.buildKeepList(bot);
 
       const chestBlock = findNearestChest();
       if (!chestBlock) {
@@ -118,6 +119,50 @@ function register(bot, goals) {
       } catch (err) {
         console.log('Deposit all error:', err.message);
         bot.chat(`Error during deposit_all: ${err.message}`);
+      } finally {
+        chestWindow.close();
+      }
+    },
+
+    inventory_cleanup: async (action) => {
+      const chestBlock = findNearestChest();
+      if (!chestBlock) {
+        return { success: false, reason: 'no chest nearby' };
+      }
+
+      const chestWindow = await navigateAndOpenChest(chestBlock);
+      if (!chestWindow) return { success: false, reason: 'failed to open chest' };
+
+      let deposited = 0;
+      try {
+        const disposable = inventoryManager.getDisposableItems(bot);
+        if (disposable.length === 0) {
+          bot.chat('Inventory is already clean.');
+          return { success: true, reason: 'nothing disposable' };
+        }
+
+        for (const entry of disposable) {
+          const remaining = Math.max(0, entry.extra);
+          if (remaining <= 0) continue;
+          const stacks = bot.inventory.items().filter(i => i.name === entry.name);
+          let left = remaining;
+          for (const stack of stacks) {
+            if (left <= 0) break;
+            const amount = Math.min(left, stack.count);
+            try {
+              await chestWindow.deposit(stack.type, stack.metadata, amount);
+              deposited += amount;
+              left -= amount;
+              await sleep(200);
+            } catch (err) {
+              console.log(`Failed to cleanup-deposit ${entry.name}:`, err.message);
+              break;
+            }
+          }
+        }
+
+        bot.chat(`Cleaned inventory. Deposited ${deposited} item(s).`);
+        return { success: deposited > 0, reason: deposited > 0 ? 'cleanup complete' : 'nothing deposited' };
       } finally {
         chestWindow.close();
       }

@@ -35,6 +35,10 @@ async function eatFood(bot) {
   return await eatBrain.eat(bot, { silent: false, force: false });
 }
 
+async function huntDrop(bot, itemName, count = 1) {
+  return await eatBrain.huntMobForDrop(bot, itemName, count, { silent: false });
+}
+
 function getRecipe(itemName) {
   return data.getRecipe(itemName);
 }
@@ -76,6 +80,7 @@ module.exports = {
   mineBlock,
   craftItem,
   eatFood,
+  huntDrop,
   getRecipe,
   getBlockDrop,
   getMobInfo,

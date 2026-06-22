@@ -15,6 +15,14 @@ const HUNT_DROP_NAMES = new Set([
   'raw_beef', 'raw_porkchop', 'raw_mutton', 'raw_chicken', 'raw_rabbit',
 ]);
 
+const DROP_NAME_ALIASES = {
+  mutton: 'raw_mutton',
+  rabbit: 'raw_rabbit',
+  porkchop: 'raw_porkchop',
+  beef: 'raw_beef',
+  chicken: 'raw_chicken',
+};
+
 // ─── Complete Minecraft Food Database ─────────────────────────────────────────
 // Each entry: { hunger, saturation, harmful, effect }
 // hunger     = hunger points restored (half drumsticks, max 20)
@@ -257,6 +265,32 @@ function findNearestFoodAnimal(bot, maxDistance = 24) {
   });
 }
 
+function countInventoryItem(bot, itemName) {
+  return bot.inventory.items()
+    .filter(item => item.name === itemName)
+    .reduce((sum, item) => sum + item.count, 0);
+}
+
+function normalizeDesiredDrop(itemName = '') {
+  const normalized = String(itemName || '').trim().toLowerCase().replace(/\s+/g, '_');
+  return DROP_NAME_ALIASES[normalized] || normalized;
+}
+
+function findNearestMobForDrop(bot, desiredDrop, options = {}) {
+  const data = require('../library/data');
+  const maxDistance = options.maxDistance || 32;
+  const wanted = normalizeDesiredDrop(desiredDrop);
+  const candidates = data.getMobsForDrop(wanted);
+  if (!candidates.length) return null;
+
+  return bot.nearestEntity(entity => {
+    if (!entity || !entity.isValid || entity.type === 'object') return false;
+    const match = candidates.find(candidate => candidate.mob === entity.name);
+    if (!match) return false;
+    return entity.position.distanceTo(bot.entity.position) <= maxDistance;
+  });
+}
+
 async function huntPassiveFood(bot, options = {}) {
   const { silent = false } = options;
   const target = findNearestFoodAnimal(bot, 24);
@@ -309,6 +343,67 @@ async function huntPassiveFood(bot, options = {}) {
   } catch (err) {
     return { success: false, reason: err.message };
   }
+}
+
+async function huntMobForDrop(bot, dropName, count = 1, options = {}) {
+  const desiredDrop = normalizeDesiredDrop(dropName);
+  const beforeCount = countInventoryItem(bot, desiredDrop);
+  const silent = !!options.silent;
+  const maxKills = options.maxKills || Math.max(1, count * 3);
+  let kills = 0;
+
+  while ((countInventoryItem(bot, desiredDrop) - beforeCount) < count && kills < maxKills) {
+    const target = findNearestMobForDrop(bot, desiredDrop, { maxDistance: options.maxDistance || 32 });
+    if (!target) {
+      return {
+        success: false,
+        reason: `no nearby mob drops ${desiredDrop}`,
+        collected: countInventoryItem(bot, desiredDrop) - beforeCount,
+      };
+    }
+
+    const mobInfo = libraryData.getMobInfo(target.name);
+    if (!mobInfo) {
+      return { success: false, reason: `unknown mob info for ${target.name}`, collected: 0 };
+    }
+
+    if (!silent) {
+      bot.chat(`Hunting ${target.name} for ${desiredDrop}.`);
+    }
+
+    try {
+      const attackBrain = require('./attack');
+      const { goals } = require('mineflayer-pathfinder');
+      const started = await attackBrain.startAttack(bot, target, { allowPassive: mobInfo.type !== 'hostile' });
+      if (!started?.started) {
+        return { success: false, reason: started?.reason || 'could not start hunt', collected: countInventoryItem(bot, desiredDrop) - beforeCount };
+      }
+
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 15000) {
+        if (!target.isValid) break;
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      attackBrain.stopAttack(bot, { silent: true });
+      await collectDrops(bot, goals, 400, { maxDistance: 14, maxItems: 12, passes: 2 });
+      kills++;
+    } catch (err) {
+      return {
+        success: false,
+        reason: err.message,
+        collected: countInventoryItem(bot, desiredDrop) - beforeCount,
+      };
+    }
+  }
+
+  const collected = countInventoryItem(bot, desiredDrop) - beforeCount;
+  return {
+    success: collected >= count,
+    reason: collected >= count ? 'drop hunted successfully' : 'not enough drops collected',
+    collected,
+    item: desiredDrop,
+  };
 }
 
 /**
@@ -490,6 +585,7 @@ module.exports = {
   rankFoods,
   pickBestFood,
   huntPassiveFood,
+  huntMobForDrop,
   eat,
   foodReport,
   startAutoEat,

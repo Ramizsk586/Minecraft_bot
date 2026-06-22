@@ -20,6 +20,7 @@ const eatBrain       = require('./eat');
 const attackBrain    = require('./attack');
 const defanceBrain   = require('./defance');
 const craftBrain     = require('./craft');
+const inventoryManager = require('./inventoryManager');
 const mineBrain      = require('./mine');
 const swimBrain      = require('./swim');
 const cookController = require('../cook');
@@ -29,7 +30,7 @@ const world  = require('../library/world');
 const skills = require('../library/skills');
 const { goals } = require('mineflayer-pathfinder');
 const { digSafely } = require('../utils');
-const { collectDrops } = require('../utils');
+const { collectDrops, isDroppedItemEntity, getDroppedItemStack } = require('../utils');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ const PRIORITIES = {
   idle:           10,
   farm:           15,
   cook:           20,
+  inventory:      22,
   gather:         25,
   upgrade:        30,
   craft_tools:    35,
@@ -66,6 +68,7 @@ const ACTION_COOLDOWNS = {
   farm: 30000,
   ai_supervisor: 45000,
   craft_bread: 20000,
+  inventory_cleanup: 20000,
   equip_torch_night: 20000,
   equip_armor: 10000,
   idle: 2500,
@@ -316,25 +319,73 @@ async function handleStarterBuildOrCraft() {
   return true;
 }
 
-function findRecoverableDrops(maxDistance = 50) {
-  return Object.values(_bot.entities || {})
-    .filter(entity => {
-      if (!entity || !entity.isValid || entity.name !== 'item') return false;
-      return entity.position.distanceTo(_bot.entity.position) <= maxDistance;
-    })
-    .sort((a, b) => a.position.distanceTo(_bot.entity.position) - b.position.distanceTo(_bot.entity.position));
+function scoreDroppedItemNeed(itemName, count = 1) {
+  if (!itemName) return 1;
+  const name = String(itemName).toLowerCase();
+
+  if (/_pickaxe$|_axe$|_sword$|_shovel$|_hoe$/.test(name)) return 28;
+  if (/_helmet$|_chestplate$|_leggings$|_boots$/.test(name)) return 24;
+  if (['shield', 'crafting_table', 'furnace', 'water_bucket', 'bucket'].includes(name) || name.endsWith('_bed')) return 20;
+  if (['bread', 'cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_cod', 'cooked_salmon'].includes(name)) {
+    return (_bot.food || 20) <= 14 ? 16 + count : 8 + Math.min(count, 4);
+  }
+  if (['torch', 'coal', 'charcoal', 'iron_ingot', 'raw_iron', 'diamond', 'gold_ingot'].includes(name)) return 12 + Math.min(count, 6);
+  if (name.includes('log') || name.includes('planks') || name === 'stick' || name === 'cobblestone') return 7 + Math.min(count, 6);
+  if (name.includes('sapling') || name === 'dirt' || name === 'sand' || name === 'gravel') return 2;
+  return 4 + Math.min(count, 5);
 }
 
-async function collectNearbyDropsWithinRadius(maxDistance = 50) {
-  const nearbyDrops = findRecoverableDrops(maxDistance);
+function scoreDropOpportunity(entity, threatReport) {
+  const stack = getDroppedItemStack(entity, _bot);
+  const distance = entity.position.distanceTo(_bot.entity.position);
+  const valueScore = scoreDroppedItemNeed(stack?.name, stack?.count || 1);
+  const distancePenalty = Math.min(8, distance * 0.35);
+  const threatPenalty = threatReport.level === 'high'
+    ? 100
+    : threatReport.level === 'medium'
+      ? 16
+      : threatReport.level === 'low'
+        ? 5
+        : 0;
+  const healthPenalty = (_bot.health || 20) <= 8 ? 10 : 0;
+  const netScore = valueScore - distancePenalty - threatPenalty - healthPenalty;
+
+  return {
+    entity,
+    stack,
+    distance,
+    valueScore,
+    netScore,
+  };
+}
+
+function findRecoverableDrops(maxDistance = 50, threatReport = null) {
+  const report = threatReport || mineBrain.scanThreatLevel(_bot, _options);
+  return Object.values(_bot.entities || {})
+    .filter(entity => {
+      if (!isDroppedItemEntity(entity)) return false;
+      return entity.position.distanceTo(_bot.entity.position) <= maxDistance;
+    })
+    .map(entity => scoreDropOpportunity(entity, report))
+    .filter(entry => entry.netScore >= 4)
+    .sort((a, b) => b.netScore - a.netScore || a.distance - b.distance);
+}
+
+async function collectNearbyDropsWithinRadius(maxDistance = 50, threatReport = null) {
+  const nearbyDrops = findRecoverableDrops(maxDistance, threatReport);
   if (nearbyDrops.length === 0) return false;
 
-  announce('collect_drops', `Collecting dropped items nearby (${nearbyDrops.length} found).`, 20000);
+  const best = nearbyDrops[0];
+  announce('collect_drops', `Collecting useful drops nearby (${nearbyDrops.length} found).`, 20000);
 
   for (const item of nearbyDrops.slice(0, 12)) {
-    if (!item?.isValid) continue;
+    const entity = item.entity;
+    if (!entity?.isValid) continue;
+    if (item.netScore < 4) continue;
+    const freshThreat = mineBrain.scanThreatLevel(_bot, _options);
+    if (freshThreat.level === 'high') break;
     try {
-      await _bot.pathfinder.goto(new goals.GoalNear(item.position.x, item.position.y, item.position.z, 1));
+      await _bot.pathfinder.goto(new goals.GoalNear(entity.position.x, entity.position.y, entity.position.z, 1));
       await sleep(150);
     } catch {
       // item may despawn or become unreachable
@@ -342,7 +393,7 @@ async function collectNearbyDropsWithinRadius(maxDistance = 50) {
   }
 
   await collectDrops(_bot, goals, 150, { maxDistance, maxItems: 24, passes: 2 });
-  return true;
+  return !!best;
 }
 
 async function handleDeathRecovery() {
@@ -360,7 +411,7 @@ async function handleDeathRecovery() {
   }
 
   const nearbyDrops = Object.values(_bot.entities).filter(entity => {
-    if (!entity || !entity.isValid || entity.name !== 'item') return false;
+    if (!isDroppedItemEntity(entity)) return false;
     return entity.position.distanceTo(recovery.position) <= 12;
   });
 
@@ -709,6 +760,7 @@ function assessSituation() {
   const biomeCategory = biomePlan.category;
   const biomeRisk     = biom.getRiskFlags(_bot);
   const biomeHazards  = biom.getHazards(_bot);
+  const inventoryPressure = inventoryManager.getInventoryPressure(_bot);
   const biomeStrategy = {
     priorities: biom.getSurvivalPriorities(_bot).slice(0, 6),
     resources: biom.getResourceTargets(_bot),
@@ -728,6 +780,7 @@ function assessSituation() {
     hasSword: _bot.inventory.items().some(i => i.name.endsWith('_sword')),
     hasWeapon: !!attackBrain.pickBestWeapon(_bot),
     hasFood: !!eatBrain.pickBestFood(_bot),
+    inventoryPressure,
     inCombat: !!_bot._combatState?.target?.isValid,
     isNight: (_bot.time?.timeOfDay || 0) >= 13000 && (_bot.time?.timeOfDay || 0) < 23000,
     biomeName,
@@ -748,6 +801,7 @@ function selectAction(situation) {
     survivalScore, health, food,
     threatReport, isDaytime, isUnderwater, isDrowning, isNight,
     hasPickaxe, hasAxe, hasSword, hasWeapon, hasFood, inCombat,
+    inventoryPressure,
     biomeCategory, biomeRisk,
   } = situation;
 
@@ -762,13 +816,32 @@ function selectAction(situation) {
     });
   }
 
-  if (!inCombat && threatReport.level === 'none' && findRecoverableDrops(50).length > 0) {
+  const recoverableDrops = !inCombat && threatReport.level !== 'high'
+    ? findRecoverableDrops(50, threatReport)
+    : [];
+
+  if (recoverableDrops.length > 0) {
     actions.push({
       name: 'collect_dropped_items',
       priority: PRIORITIES.gather + 1,
       maxDuration: 20000,
       execute: async () => {
-        await collectNearbyDropsWithinRadius(50);
+        await collectNearbyDropsWithinRadius(50, threatReport);
+      },
+    });
+  }
+
+  if (!inCombat && threatReport.level === 'none' && inventoryPressure.shouldCleanup) {
+    actions.push({
+      name: 'inventory_cleanup',
+      priority: inventoryPressure.shouldPanicCleanup ? PRIORITIES.craft_tools + 2 : PRIORITIES.inventory,
+      maxDuration: 12000,
+      execute: async () => {
+        announce('inventory_cleanup', 'Cleaning inventory to protect survival supplies.', 20000);
+        const result = await _bot.executeAction({ action: 'inventory_cleanup' });
+        if (!result?.success) {
+          log(`Inventory cleanup skipped: ${result?.reason || result?.error || 'unknown reason'}`);
+        }
       },
     });
   }
@@ -1156,18 +1229,19 @@ function selectAction(situation) {
     }
   }
 
-  if (
+  const canUseAIForWork = (
     _bot.runAIAutonomy &&
     _bot.aiAutonomy?.enabled &&
-    survivalScore >= 70 &&
-    health >= 14 &&
-    food >= 12 &&
-    threatReport.level === 'none' &&
+    threatReport.level !== 'high' &&
     !inCombat &&
-    !isNight &&
     !isUnderwater &&
-    !isDrowning
-  ) {
+    !isDrowning &&
+    health >= 10 &&
+    food >= 8
+  );
+  const noUsefulWorkYet = actions.length === 0;
+
+  if (canUseAIForWork) {
     actions.push({
       name: 'ai_supervisor',
       priority: PRIORITIES.idle + 3,
@@ -1180,6 +1254,7 @@ function selectAction(situation) {
           biomeRisk,
           topPriorities: situation.biomeStrategy?.priorities?.slice(0, 3) || [],
           lastAction: _state.lastAction,
+          noWorkAvailable: noUsefulWorkYet,
         });
         if (!result.success && result.reason !== 'cooldown') {
           log(`AI supervisor skipped: ${result.reason}`);
@@ -1189,7 +1264,7 @@ function selectAction(situation) {
   }
 
   // ── 15. Idle — nothing urgent ──
-  if (actions.length === 0 || survivalScore > 80) {
+  if (actions.length === 0 || (survivalScore > 80 && !canUseAIForWork)) {
     actions.push({
       name: 'idle',
       priority: PRIORITIES.idle,

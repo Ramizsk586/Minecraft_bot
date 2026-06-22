@@ -59,6 +59,31 @@ function getMobInfo(mobName) {
   return mobMap[normalized] || null;
 }
 
+function getMobsForDrop(itemName) {
+  const normalized = normalizeKey(itemName);
+  const matches = [];
+
+  for (const [mobName, info] of Object.entries(mobMap)) {
+    const drops = Array.isArray(info?.drops) ? info.drops : [];
+    if (drops.includes(normalized)) {
+      matches.push({
+        mob: mobName,
+        type: info.type || 'neutral',
+        threat: info.threat || 0,
+        drops,
+      });
+    }
+  }
+
+  return matches.sort((a, b) => {
+    if (a.type !== b.type) {
+      if (a.type === 'passive') return -1;
+      if (b.type === 'passive') return 1;
+    }
+    return (a.threat || 0) - (b.threat || 0);
+  });
+}
+
 function getRecipe(itemName) {
   const normalized = normalizeKey(itemName);
   if (currentBot) {
@@ -145,6 +170,7 @@ module.exports = {
   cook,
   getBlockDrop,
   getMobInfo,
+  getMobsForDrop,
   getRecipe,
   getBuild,
   getCookableFood,

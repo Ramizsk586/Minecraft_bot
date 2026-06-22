@@ -260,6 +260,47 @@ function findBestFood(bot) {
 /**
  * Wait briefly then collect nearby dropped items by walking to them.
  */
+function isDroppedItemEntity(entity) {
+  if (!entity || !entity.isValid || !entity.position) return false;
+  if (entity.name === 'item') return true;
+
+  // Some mineflayer entity snapshots expose dropped items as generic objects
+  // with item payload metadata instead of the literal name "item".
+  return entity.type === 'object' && (
+    entity.objectType === 'Item Stack' ||
+    entity.displayName === 'Item' ||
+    entity.username === 'Item' ||
+    entity.metadata?.some?.(value => value && typeof value === 'object' && 'itemCount' in value)
+  );
+}
+
+function getDroppedItemStack(entity, bot = null) {
+  if (!isDroppedItemEntity(entity)) return null;
+
+  const metadataEntry = entity.metadata?.find?.(value => value && typeof value === 'object' && 'itemCount' in value);
+  if (metadataEntry) {
+    const itemId = metadataEntry.itemId ?? metadataEntry.blockId ?? metadataEntry.id;
+    const itemName = (bot?.registry?.items?.[itemId]?.name) || metadataEntry.name || entity.droppedItem?.name || null;
+    return {
+      name: itemName,
+      count: metadataEntry.itemCount || metadataEntry.count || 1,
+    };
+  }
+
+  const droppedItem = entity.droppedItem || entity.item || null;
+  if (droppedItem) {
+    return {
+      name: droppedItem.name || (bot?.registry?.items?.[droppedItem.type]?.name) || null,
+      count: droppedItem.count || 1,
+    };
+  }
+
+  return {
+    name: null,
+    count: 1,
+  };
+}
+
 async function collectDrops(bot, goals, waitMs = 600, options = {}) {
   const {
     maxDistance = 12,
@@ -271,7 +312,7 @@ async function collectDrops(bot, goals, waitMs = 600, options = {}) {
 
   for (let pass = 0; pass < passes; pass++) {
     const nearby = Object.values(bot.entities)
-      .filter(e => e.name === 'item' && e.position.distanceTo(bot.entity.position) < maxDistance)
+      .filter(e => isDroppedItemEntity(e) && e.position.distanceTo(bot.entity.position) < maxDistance)
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position));
 
     if (nearby.length === 0) break;
@@ -301,6 +342,8 @@ module.exports = {
   digSafely,
   findBestFood,
   collectDrops,
+  isDroppedItemEntity,
+  getDroppedItemStack,
   TOOL_FOR_BLOCK,
   TOOL_TIERS,
   inferPreferredToolType,

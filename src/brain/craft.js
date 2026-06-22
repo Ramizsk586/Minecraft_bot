@@ -7,6 +7,13 @@
 
 const { collectDrops, digSafely } = require('../utils');
 
+const SMELT_RECIPES = {
+  iron_ingot: { input: 'raw_iron', output: 1 },
+  gold_ingot: { input: 'raw_gold', output: 1 },
+  copper_ingot: { input: 'raw_copper', output: 1 },
+  charcoal: { input: '_logs', output: 1 },
+};
+
 // ─── Material Tiers ───────────────────────────────────────────────────────────
 // Ordered best → worst. The brain tries the best tier first and falls back.
 
@@ -191,6 +198,21 @@ function normalizeCraftName(itemName = '') {
   return CRAFT_ALIASES[normalized] || normalized;
 }
 
+function canSmeltItem(itemName) {
+  return !!SMELT_RECIPES[itemName];
+}
+
+function getInventoryCountForRequirement(bot, itemName) {
+  if (itemName === '_planks') return countAnyOf(bot, PLANK_TYPES);
+  if (itemName === '_logs') return countAnyOf(bot, LOG_TYPES);
+  if (itemName === 'coal') return countItem(bot, 'coal') + countItem(bot, 'charcoal');
+  return countItem(bot, itemName);
+}
+
+function isItemSatisfied(bot, itemName, count = 1) {
+  return getInventoryCountForRequirement(bot, itemName) >= count;
+}
+
 function getTierInfoByName(name = '') {
   return MATERIAL_TIERS.find(t => name.startsWith(`${t.tier}_`)) || null;
 }
@@ -287,6 +309,41 @@ function plankStatus(bot) {
   const have = countAnyOf(bot, PLANK_TYPES);
   const totalLogs = countAnyOf(bot, LOG_TYPES);
   return { have, canMake: totalLogs * 4, totalLogs };
+}
+
+function isAirLikeBlock(block) {
+  if (!block) return true;
+  return ['air', 'cave_air', 'void_air'].includes(block.name);
+}
+
+function isReplaceablePlacementBlock(block) {
+  if (!block) return true;
+  return isAirLikeBlock(block) || [
+    'water', 'lava', 'short_grass', 'tall_grass', 'fern', 'large_fern',
+    'dead_bush', 'snow', 'vine', 'seagrass', 'tall_seagrass'
+  ].includes(block.name);
+}
+
+function findNearbyPlacementSpot(bot) {
+  const base = bot.entity.position.floored();
+  const offsets = [
+    [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1],
+    [1, 1, 1], [1, 1, -1], [-1, 1, 1], [-1, 1, -1],
+  ];
+
+  for (const [dx, dy, dz] of offsets) {
+    const targetPos = base.offset(dx, dy, dz);
+    const supportPos = targetPos.offset(0, -1, 0);
+    const targetBlock = bot.blockAt(targetPos);
+    const supportBlock = bot.blockAt(supportPos);
+
+    if (!supportBlock || isAirLikeBlock(supportBlock) || supportBlock.boundingBox === 'empty') continue;
+    if (!isReplaceablePlacementBlock(targetBlock)) continue;
+
+    return { targetPos, targetBlock, supportBlock };
+  }
+
+  return null;
 }
 
 /**
@@ -416,6 +473,14 @@ function resolveDependencies(bot, targetItem, count = 1) {
       return needed === 0;
     }
 
+    if (item === 'charcoal') {
+      const charcoalQty = virtualInventory.charcoal || 0;
+      if (charcoalQty >= qty) {
+        virtualInventory.charcoal -= qty;
+        return true;
+      }
+    }
+
     if (item === '_sticks') {
       return resolve('stick', qty);
     }
@@ -462,6 +527,13 @@ function resolveDependencies(bot, targetItem, count = 1) {
         count: recipe.output || 1,
         ingredients
       };
+    } else if (canSmeltItem(item)) {
+      const smeltRecipe = SMELT_RECIPES[item];
+      recipeInfo = {
+        count: smeltRecipe.output || 1,
+        ingredients: [{ item: smeltRecipe.input, count: 1 }],
+        smelt: true,
+      };
     } else {
       const registryRecipe = libraryData.getRecipe(item);
       if (registryRecipe) {
@@ -491,9 +563,10 @@ function resolveDependencies(bot, targetItem, count = 1) {
     const outputName = tier ? `${tier.tier}_${item.split('_').slice(1).join('_')}` : item;
     const finalItemName = PLANK_TYPES.includes(outputName) ? 'planks' : outputName;
     steps.push({
-      action: 'craft',
+      action: recipeInfo.smelt ? 'smelt' : 'craft',
       item: finalItemName,
       count: batches,
+      input: recipeInfo.smelt ? recipeInfo.ingredients[0]?.item : undefined,
       reason: `need ${qty} ${item}`
     });
 
@@ -602,15 +675,17 @@ async function ensureCraftingTable(bot, goals) {
     const tableItem = findItemSlot(bot, 'crafting_table');
     if (tableItem) {
       try {
-        const pos = bot.entity.position.floored();
-        const targetPos = pos.offset(1, 0, 0);
-        const targetBlock = bot.blockAt(targetPos);
+        const placement = findNearbyPlacementSpot(bot);
+        if (!placement) {
+          console.log('[Crafting] No nearby empty spot to place crafting table.');
+          return null;
+        }
+        const { targetPos, targetBlock, supportBlock } = placement;
 
-        // If targetPos is occupied by a solid block, dig it first!
-        if (targetBlock && targetBlock.name !== 'air' && targetBlock.name !== 'cave_air' && targetBlock.name !== 'water' && targetBlock.name !== 'lava') {
-          console.log(`[Crafting] Target place block ${targetBlock.name} at ${targetPos} is solid. Digging it first...`);
+        if (targetBlock && !isAirLikeBlock(targetBlock) && targetBlock.boundingBox !== 'empty') {
+          console.log(`[Crafting] Clearing ${targetBlock.name} at ${targetPos} before placing crafting table...`);
           const { sleep } = require('../utils');
-          const digResult = await digSafely(bot, targetBlock, { requireDrops: true });
+          const digResult = await digSafely(bot, targetBlock, { requireDrops: false });
           if (!digResult.success) {
             console.log(`[Crafting] Refusing unsafe dig for ${targetBlock.name}: ${digResult.reason}`);
             return null;
@@ -618,11 +693,10 @@ async function ensureCraftingTable(bot, goals) {
           await sleep(500);
         }
 
-        const placeOn = bot.blockAt(targetPos.offset(0, -1, 0));
-        if (placeOn && placeOn.name !== 'air') {
+        if (supportBlock && !isAirLikeBlock(supportBlock)) {
           await bot.equip(tableItem, 'hand');
           const { Vec3 } = require('vec3');
-          await bot.placeBlock(placeOn, new Vec3(0, 1, 0));
+          await bot.placeBlock(supportBlock, new Vec3(0, 1, 0));
           bot.chat('📦 Placed crafting table.');
           // Re-find it
           table = bot.findBlock({ matching: tableId, maxDistance: 8 });
@@ -666,6 +740,18 @@ async function executeCraftStep(bot, step, table) {
   }
   if (step.item === 'stick') {
     return await craftSticks(bot, step.count);
+  }
+  if (step.action === 'smelt') {
+    const cookBrain = require('../cook');
+    const inputName = step.input === '_logs'
+      ? (findAnyOf(bot, LOG_TYPES)?.name || null)
+      : step.input;
+    if (!inputName) {
+      bot.chat(`Missing smelt input for ${step.item}.`);
+      return false;
+    }
+    const result = await cookBrain.smeltItem(bot, inputName, step.count);
+    return !!result?.success;
   }
 
   const itemId = bot.registry.itemsByName[step.item]?.id;
@@ -724,13 +810,18 @@ async function craft(bot, itemName, count = 1, options = {}) {
     return { success: false, crafted: null, steps: 0, reason: 'missing materials' };
   }
 
+  if (steps.length === 0 && isItemSatisfied(bot, normalized, count)) {
+    return { success: true, crafted: normalized, steps: 0, reason: 'already owned' };
+  }
+
   if (!silent) bot.chat(`🔨 Crafting ${count}x ${itemName} (${steps.length} step${steps.length > 1 ? 's' : ''})...`);
 
   // Get crafting table if any step needs it
-  const needsTable = steps.some(s => {
-    const r = RECIPES[s.item];
-    return r ? r.needsTable : true; // default assume table needed
-  });
+    const needsTable = steps.some(s => {
+      if (s.action === 'smelt') return false;
+      const r = RECIPES[s.item];
+      return r ? r.needsTable : true; // default assume table needed
+    });
 
   let table = null;
   let temporaryTableUsed = false;
@@ -753,13 +844,48 @@ async function craft(bot, itemName, count = 1, options = {}) {
         if (!silent) bot.chat(`Craft chain failed at step: ${step.item} (${step.reason})`);
         return { success: false, crafted: step.item, steps: completed, reason: `failed at ${step.item}` };
       }
+
+      if (!isItemSatisfied(bot, step.item, 1)) {
+        const { sleep } = require('../utils');
+        await sleep(500);
+        if (!isItemSatisfied(bot, step.item, 1)) {
+          if (step.action !== 'smelt') {
+            const { goals } = require('mineflayer-pathfinder');
+            await collectDrops(bot, goals, 250, { maxDistance: 10, maxItems: 8, passes: 2 }).catch(() => {});
+          }
+          if (!isItemSatisfied(bot, step.item, 1)) {
+            if (!silent) bot.chat(`Craft verification failed for ${step.item}.`);
+            return { success: false, crafted: step.item, steps: completed, reason: `verification failed at ${step.item}` };
+          }
+        }
+      }
+
       completed++;
       console.log(`🧠 Brain:Craft step ${completed}/${steps.length}: ${step.item} x${step.count} ✓`);
     }
 
-    const finalItem = steps[steps.length - 1].item;
+    const finalItem = steps.length > 0 ? steps[steps.length - 1].item : normalized;
+    if (!isItemSatisfied(bot, finalItem, count)) {
+      return { success: false, crafted: finalItem, steps: completed, reason: `missing final item ${finalItem}` };
+    }
     if (!silent) bot.chat(`✅ Crafted ${count}x ${finalItem}!`);
     console.log(`🧠 Brain:Craft complete → ${count}x ${finalItem}`);
+
+    if (/_(sword|axe)$/.test(finalItem)) {
+      const attackBrain = require('./attack');
+      await attackBrain.equipBestWeapon(bot).catch(() => {});
+    } else if (/_(helmet|chestplate|leggings|boots)$/.test(finalItem)) {
+      const item = findItemSlot(bot, finalItem);
+      if (item) {
+        const armorType = finalItem.split('_').slice(1).join('_');
+        const dest = armorType === 'helmet' ? 'head'
+          : armorType === 'chestplate' ? 'torso'
+          : armorType === 'leggings' ? 'legs'
+          : armorType === 'boots' ? 'feet'
+          : null;
+        if (dest) await bot.equip(item, dest).catch(() => {});
+      }
+    }
 
     return { success: true, crafted: finalItem, steps: completed, reason: 'success' };
   } finally {
@@ -1131,6 +1257,13 @@ module.exports = {
   stickStatus,
   findBestTier,
   getBestCraftableTier,
+  getBestOwnedTieredItem,
+  getOwnedTieredItem,
+  getEquippedArmorTier,
+  ensureCraftingTable,
+  cleanupTemporaryStation,
+  trackTemporaryStation,
+  findNearbyPlacementSpot,
   // Reports
   craftReport,
   showMissingMaterials,

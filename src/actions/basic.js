@@ -1,5 +1,6 @@
 // ─── Basic Actions ────────────────────────────────────────────────────────────
 // Chat, goto, follow, stop, attack, equip, eat, collect, craft, sequence
+const { isDroppedItemEntity } = require('../utils');
 
 const { sleep } = require('../utils');
 
@@ -224,10 +225,37 @@ function register(bot, goals) {
     },
 
     collect: async (action) => {
-      bot.chat(`Collecting nearby items...`);
-      const dropped = Object.values(bot.entities).filter(
-        e => e.name === 'item' && e.position.distanceTo(bot.entity.position) < 16
-      );
+      const requestedItem = String(action.item || action.target || '').trim().toLowerCase();
+      const playerName = action.player || action.username || null;
+      const gatherWoodTargets = new Set(['wood', 'log', 'logs', 'tree', 'trees', 'oak_log', 'spruce_log', 'birch_log', 'jungle_log']);
+
+      if (
+        requestedItem &&
+        (gatherWoodTargets.has(requestedItem) ||
+          requestedItem.includes('wood') ||
+          requestedItem.includes('log') ||
+          requestedItem.includes('tree'))
+      ) {
+        if (bot.executeAction) {
+          await bot.executeAction({ action: 'gather_wood', count: 1, replant: false });
+          bot.chat(`Gathered wood for ${playerName || 'you'}.`);
+          return;
+        }
+      }
+
+      const beforeCounts = {};
+      for (const item of bot.inventory.items()) {
+        beforeCounts[item.name] = (beforeCounts[item.name] || 0) + item.count;
+      }
+
+      bot.chat(requestedItem ? `Collecting nearby ${requestedItem}...` : 'Collecting nearby items...');
+      const dropped = Object.values(bot.entities).filter(e => {
+        if (!isDroppedItemEntity(e) || e.position.distanceTo(bot.entity.position) >= 16) return false;
+        if (!requestedItem) return true;
+        const droppedName = e.metadata?.find?.(value => value && typeof value === 'object' && value.itemId)?.name || '';
+        const nameGuess = String(droppedName || e.displayName || e.name || '').toLowerCase();
+        return !nameGuess || nameGuess.includes(requestedItem) || requestedItem.includes(nameGuess);
+      });
       let collected = 0;
       for (const item of dropped.slice(0, 10)) {
         try {
@@ -240,6 +268,43 @@ function register(bot, goals) {
         }
         await sleep(200);
       }
+
+      const afterCounts = {};
+      for (const item of bot.inventory.items()) {
+        afterCounts[item.name] = (afterCounts[item.name] || 0) + item.count;
+      }
+      const gainedStacks = Object.entries(afterCounts)
+        .map(([name, count]) => ({ name, count: count - (beforeCounts[name] || 0) }))
+        .filter(entry => entry.count > 0 && (!requestedItem || entry.name.includes(requestedItem) || requestedItem.includes(entry.name)));
+
+      if (playerName && gainedStacks.length > 0) {
+        const playerEntity = bot.players[playerName]?.entity;
+        if (playerEntity) {
+          try {
+            await bot.pathfinder.goto(new goals.GoalNear(playerEntity.position.x, playerEntity.position.y, playerEntity.position.z, 2));
+          } catch {}
+
+          for (const gained of gainedStacks) {
+            const stacks = bot.inventory.items().filter(i => i.name === gained.name);
+            let left = gained.count;
+            for (const stack of stacks) {
+              if (left <= 0) break;
+              const amount = Math.min(left, stack.count);
+              try {
+                await bot.toss(stack.type, stack.metadata, amount);
+                left -= amount;
+                await sleep(250);
+              } catch (err) {
+                console.log(`Failed to toss ${gained.name} to ${playerName}: ${err.message}`);
+                break;
+              }
+            }
+          }
+          bot.chat(`Collected ${collected} items and gave them to ${playerName}.`);
+          return;
+        }
+      }
+
       bot.chat(`Collected ${collected} items.`);
     },
 

@@ -169,7 +169,43 @@ const MINE_REPORT_PATTERNS = [
   /^scan[\s-]?threat/i,
 ];
 
-async function tryHandle(bot, command) {
+const COLLECT_PATTERNS = [
+  /^collect$/i,
+  /^collect\s+(.+)$/i,
+  /^pick\s+up\s+(.+)$/i,
+  /^grab\s+(.+)$/i,
+];
+
+const FOLLOW_PATTERNS = [
+  /^follow\s+me$/i,
+  /^follow$/i,
+  /^come\s+here$/i,
+  /^come\s+to\s+me$/i,
+  /^stay\s+with\s+me$/i,
+  /^keep\s+following\s+me$/i,
+];
+
+const STOP_FOLLOW_PATTERNS = [
+  /^stop\s+following$/i,
+  /^don't\s+follow\s+me$/i,
+  /^unfollow$/i,
+  /^stay\s+here$/i,
+  /^wait\s+here$/i,
+];
+
+const MOB_DROP_INFO_PATTERNS = [
+  /^what\s+does\s+(.+)\s+drop$/i,
+  /^which\s+animal\s+drops\s+(.+)$/i,
+  /^who\s+drops\s+(.+)$/i,
+];
+
+const HUNT_DROP_PATTERNS = [
+  /^get\s+(\d+)?\s*(.+)$/i,
+  /^bring\s+me\s+(\d+)?\s*(.+)$/i,
+  /^hunt\s+(\d+)?\s*(.+)$/i,
+];
+
+async function tryHandle(bot, command, username = null) {
   const trimmed = command.trim().toLowerCase();
 
   const handledChat = await chatBrain.tryHandleChat(bot, _brainOptions.owner || 'Player', command);
@@ -242,6 +278,34 @@ async function tryHandle(bot, command) {
     const match = trimmed.match(pattern);
     if (!match) continue;
     return await handleMineCommand(bot, trimmed, match[1] || null);
+  }
+
+  for (const pattern of COLLECT_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+    return await handleCollectCommand(bot, username, match[1] || null);
+  }
+
+  for (const pattern of FOLLOW_PATTERNS) {
+    if (!pattern.test(trimmed)) continue;
+    return await handleFollowPlayer(bot, username);
+  }
+
+  for (const pattern of STOP_FOLLOW_PATTERNS) {
+    if (!pattern.test(trimmed)) continue;
+    return await stopFollowing(bot);
+  }
+
+  for (const pattern of MOB_DROP_INFO_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+    return await handleMobDropInfo(bot, match[1] || match[2] || '');
+  }
+
+  for (const pattern of HUNT_DROP_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+    return await handleHuntDropCommand(bot, username, match[2] || match[3] || match[1] || '', parseInt(match[1], 10) || 1);
   }
 
   for (const pattern of COMBAT_REPORT_PATTERNS) {
@@ -420,6 +484,94 @@ async function handleMineCommand(bot, rawCommand, capturedTarget) {
   mineBrain.setMiningMode(bot, 'mixed');
   const result = await mineBrain.runMineDecision(bot, _brainOptions);
   bot.chat(result.success ? `Mining brain: ${result.reason}. Threat=${result.threat}.` : `Mining brain idle: ${result.reason}.`);
+  return true;
+}
+
+async function handleFollowPlayer(bot, username) {
+  const playerName = username || _brainOptions.owner || null;
+  if (!playerName) {
+    bot.chat("I don't know who to follow.");
+    return true;
+  }
+
+  if (!bot.executeAction) {
+    bot.chat('Follow action is not ready yet.');
+    return true;
+  }
+
+  await bot.executeAction({ action: 'follow', player: playerName });
+  return true;
+}
+
+async function stopFollowing(bot) {
+  if (bot.executeAction) {
+    await bot.executeAction({ action: 'stop' });
+  } else {
+    bot.pathfinder.setGoal(null);
+    bot._currentTask = null;
+  }
+  bot.chat('Okay, I will stop following.');
+  return true;
+}
+
+async function handleCollectCommand(bot, username, targetName) {
+  if (!bot.executeAction) {
+    bot.chat('Collect action is not ready yet.');
+    return true;
+  }
+
+  const normalizedTarget = targetName ? targetName.trim().replace(/\s+/g, '_').toLowerCase() : null;
+  const gatherWoodTargets = new Set(['wood', 'log', 'logs', 'tree', 'trees', 'oak_log', 'spruce_log', 'birch_log', 'jungle_log']);
+
+  if (
+    normalizedTarget &&
+    (gatherWoodTargets.has(normalizedTarget) ||
+      normalizedTarget.includes('wood') ||
+      normalizedTarget.includes('log') ||
+      normalizedTarget.includes('tree'))
+  ) {
+    return await handleMineCommand(bot, `gather ${normalizedTarget}`, 'wood');
+  }
+
+  await bot.executeAction({
+    action: 'collect',
+    item: normalizedTarget,
+    player: username || _brainOptions.owner || null,
+  });
+  return true;
+}
+
+async function handleMobDropInfo(bot, itemName) {
+  const data = require('../library/data');
+  const normalized = itemName.trim().replace(/\s+/g, '_').toLowerCase();
+  const mobs = data.getMobsForDrop(normalized);
+  if (!mobs.length) {
+    bot.chat(`I don't know any mob that drops ${normalized}.`);
+    return true;
+  }
+
+  const summary = mobs.slice(0, 4).map(entry => `${entry.mob} (${entry.type})`).join(', ');
+  bot.chat(`${normalized} can drop from: ${summary}.`);
+  return true;
+}
+
+async function handleHuntDropCommand(bot, username, itemName, count = 1) {
+  const data = require('../library/data');
+  const normalized = itemName.trim().replace(/\s+/g, '_').toLowerCase();
+  const mobs = data.getMobsForDrop(normalized);
+  if (!mobs.length) {
+    return false;
+  }
+
+  const result = await eatBrain.huntMobForDrop(bot, normalized, count, { silent: false });
+  if (result.success) {
+    bot.chat(`Collected ${result.collected} ${result.item}.`);
+    if (username && bot.executeAction) {
+      await bot.executeAction({ action: 'collect', item: normalized, player: username });
+    }
+  } else {
+    bot.chat(`Couldn't get ${normalized}: ${result.reason}.`);
+  }
   return true;
 }
 
